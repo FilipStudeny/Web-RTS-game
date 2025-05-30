@@ -14,16 +14,18 @@ import { useEffect, useRef, useState } from "react";
 export const Route = createFileRoute("/load-scenario")({
 	component: LoadScenarioPage,
 });
+
 function LoadScenarioPage() {
 	const sessions = [
-		{ id: "1", name: "Operation Thunder", ip: "192.168.0.101", scenario: "Desert Assault" },
-		{ id: "2", name: "Red Dawn", ip: "192.168.0.102", scenario: "Arctic Conflict" },
-		{ id: "3", name: "Steel Strike", ip: "192.168.0.103", scenario: "Urban Siege" },
+		{ id: "1", name: "Operation Thunder", ip: "192.168.0.101", scenario: "Desert Assault", players: ["Alpha", "Bravo"] },
+		{ id: "2", name: "Red Dawn", ip: "192.168.0.102", scenario: "Arctic Conflict", players: ["Echo", "Foxtrot", "Zulu"] },
+		{ id: "3", name: "Steel Strike", ip: "192.168.0.103", scenario: "Urban Siege", players: ["Delta"] },
 	];
 
 	const [creating, setCreating] = useState(false);
 	const [scenario, setScenario] = useState("Desert Assault");
 	const [password, setPassword] = useState("");
+	const [selectedSession, setSelectedSession] = useState<typeof sessions[0] | null>(null);
 
 	return (
 		<div className="flex w-full h-full text-white bg-gray-900">
@@ -40,7 +42,13 @@ function LoadScenarioPage() {
 					</thead>
 					<tbody>
 						{sessions.map((session) => (
-							<tr key={session.id} className="bg-gray-700 hover:bg-gray-600 transition rounded">
+							<tr
+								key={session.id}
+								onClick={() => setSelectedSession(session)}
+								className={`bg-gray-700 hover:bg-gray-600 transition rounded cursor-pointer ${
+									selectedSession?.id === session.id ? "ring-2 ring-blue-500" : ""
+								}`}
+							>
 								<td className="px-2 py-2">
 									<div className="font-semibold">{session.name}</div>
 									<div className="text-xs text-gray-400">{session.ip}</div>
@@ -61,9 +69,11 @@ function LoadScenarioPage() {
 				</table>
 			</div>
 
-			{/* Right: Create session panel */}
+			{/* Right: Preview or create panel */}
 			<div className="w-1/3 h-full flex flex-col bg-gray-800 p-6 overflow-y-auto">
-				{!creating ? (
+				{selectedSession ? (
+					<SelectedSessionPanel session={selectedSession} clearSelection={() => setSelectedSession(null)} />
+				) : !creating ? (
 					<div className="flex flex-col items-center justify-center h-full">
 						<h2 className="text-xl font-bold mb-4">Host a New Session</h2>
 						<p className="mb-6 text-center text-gray-300">
@@ -115,10 +125,7 @@ function CreateSessionForm({
 
 		const view = new View({ center: [0, 0], zoom: 2 });
 
-		const scaleLine = new ScaleLine({
-			units: "metric",
-			minWidth: 64,
-		});
+		const scaleLine = new ScaleLine({ units: "metric", minWidth: 64 });
 
 		mapInstance.current = new Map({
 			target: mapRef.current,
@@ -158,9 +165,7 @@ function CreateSessionForm({
 
 		const boundaryLayer = new VectorLayer({
 			source: new VectorSource({ features: [boundaryFeature] }),
-			style: new Style({
-				stroke: new Stroke({ color: "red", width: 2 }),
-			}),
+			style: new Style({ stroke: new Stroke({ color: "red", width: 2 }) }),
 		});
 		boundaryLayer.set("name", "boundary");
 
@@ -183,10 +188,7 @@ function CreateSessionForm({
 			</select>
 
 			<label className="text-sm">Preview Map:</label>
-			<div
-				ref={mapRef}
-				className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden"
-			/>
+			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
 
 			<div className="flex items-center gap-2 mt-2">
 				<input
@@ -217,6 +219,107 @@ function CreateSessionForm({
 			<button className="mt-4 bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-semibold">
 				Start Session
 			</button>
+		</div>
+	);
+}
+
+function SelectedSessionPanel({
+	session,
+	clearSelection,
+}: {
+	session: { id: string, name: string, scenario: string, players: string[] },
+	clearSelection: ()=> void,
+}) {
+	const mapRef = useRef<HTMLDivElement | null>(null);
+	const mapInstance = useRef<Map | null>(null);
+
+	const scenarioBounds: Record<string, [number, number, number, number]> = {
+		"Desert Assault": [-1300000, 1900000, -1100000, 2100000],
+		"Arctic Conflict": [2000000, 9500000, 4000000, 10500000],
+		"Urban Siege": [1490000, 6890000, 1498000, 6898000],
+	};
+
+	useEffect(() => {
+		if (!mapRef.current) return;
+
+		if (mapInstance.current) {
+			mapInstance.current.setTarget(undefined);
+			mapInstance.current = null;
+		}
+
+		const view = new View({ center: [0, 0], zoom: 2 });
+		const extent = scenarioBounds[session.scenario];
+
+		const scaleLine = new ScaleLine({ units: "metric", minWidth: 64 });
+
+		mapInstance.current = new Map({
+			target: mapRef.current,
+			interactions: [],
+			controls: [scaleLine],
+			layers: [new TileLayer({ source: new OSM() })],
+			view,
+		});
+
+		if (extent) {
+			view.fit(extent, { padding: [20, 20, 20, 20] });
+
+			const boundaryFeature = new Feature(
+				new Polygon([
+					[
+						[extent[0], extent[1]],
+						[extent[0], extent[3]],
+						[extent[2], extent[3]],
+						[extent[2], extent[1]],
+						[extent[0], extent[1]],
+					],
+				]),
+			);
+
+			const boundaryLayer = new VectorLayer({
+				source: new VectorSource({ features: [boundaryFeature] }),
+				style: new Style({
+					stroke: new Stroke({ color: "red", width: 2 }),
+				}),
+			});
+
+			mapInstance.current.addLayer(boundaryLayer);
+		}
+	}, [session]);
+
+	return (
+		<div className="flex flex-col gap-4">
+			<div className="flex items-center justify-between">
+				<h2 className="text-xl font-bold">{session.name}</h2>
+				<button onClick={clearSelection} className="text-sm text-gray-400 hover:text-white">
+					Clear
+				</button>
+			</div>
+
+			<p className="text-gray-300 text-sm">Scenario: {session.scenario}</p>
+
+			<label className="text-sm">Map Preview:</label>
+			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
+
+			<label className="text-sm">Players in Game:</label>
+			<ul className="bg-gray-700 p-2 rounded text-sm">
+				{session.players.length ? (
+					session.players.map((p) => (
+						<li key={p} className="py-1 border-b border-gray-600 last:border-b-0">
+							{p}
+						</li>
+					))
+				) : (
+					<li className="text-gray-400 italic">No players yet</li>
+				)}
+			</ul>
+
+			<Link
+				to="/session/$sessionId"
+				params={{ sessionId: session.id }}
+				className="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold text-center"
+			>
+				Join Session
+			</Link>
 		</div>
 	);
 }
