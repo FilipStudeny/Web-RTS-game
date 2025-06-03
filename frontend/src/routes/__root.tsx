@@ -13,7 +13,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 		<>
 			<div className="flex flex-col h-screen">
 				<Header />
-				<div className="flex-1 overflow-hidden">
+				<div className="flex-1">
 					<Outlet />
 				</div>
 			</div>
