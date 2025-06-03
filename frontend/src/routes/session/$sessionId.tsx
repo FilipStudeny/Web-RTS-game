@@ -1,9 +1,10 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { Hammer, Package, Users, X, Ruler } from "lucide-react";
+import Feature, { type FeatureLike } from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
 import { click } from "ol/events/condition";
-import { LineString } from "ol/geom";
+import { LineString, Point } from "ol/geom";
 import { Select } from "ol/interaction";
 import { Draw } from "ol/interaction";
 import { Vector as VectorLayer } from "ol/layer";
@@ -12,7 +13,7 @@ import { fromLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
 import { getLength } from "ol/sphere";
-import { Style, Stroke, Text, Fill } from "ol/style";
+import { Style, Stroke, Text, Fill, Circle as CircleStyle } from "ol/style";
 import { useEffect, useRef, useState } from "react";
 
 import { renderEntityFeatures, type Entity } from "@/utils/renderEntity";
@@ -31,6 +32,12 @@ type Unit = {
 	position: [number, number],
 	type: string,
 	side: "friendly" | "enemy",
+};
+
+type Objective = {
+	letter: string,
+	state: "neutral" | "capturing" | "captured",
+	position: [number, number], // [lon, lat]
 };
 
 type PanelProps = {
@@ -78,6 +85,7 @@ function RouteComponent() {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
 	const vectorSourceRef = useRef(new VectorSource());
+
 	const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
 	const [chatMessages, setChatMessages] = useState<string[]>([]);
 	const [chatInput, setChatInput] = useState("");
@@ -91,6 +99,14 @@ function RouteComponent() {
 	const measureLayerRef = useRef<VectorLayer<any> | null>(null);
 	const measureSourceRef = useRef<VectorSource>(new VectorSource());
 	const drawInteractionRef = useRef<Draw | null>(null);
+
+	// —— Example objectives (replace with actual positions) ——
+	const [objectives, setObjectives] = useState<Objective[]>([
+		{ letter: "A", state: "captured", position: [-0.1276, 51.5074] }, // London
+		{ letter: "B", state: "capturing", position: [2.3522, 48.8566] }, // Paris
+		{ letter: "C", state: "neutral", position: [13.4050, 52.5200] }, // Berlin
+		{ letter: "D", state: "neutral", position: [18.0686, 59.3293] }, // Stockholm
+	]);
 
 	const [units] = useState<Unit[]>([
 		{
@@ -121,14 +137,28 @@ function RouteComponent() {
 	const unitsInBuild = 2;
 	const supplies = 300;
 
+	// Helper for top‐bar styling (matching map icon colors)
+	function getCircleClasses(state: Objective["state"]) {
+		switch (state) {
+			case "neutral":
+				return "border-gray-500 bg-gray-700 text-gray-200";
+			case "capturing":
+				return "border-amber-400 bg-gray-700 text-amber-300 animate-pulse";
+			case "captured":
+				return "border-emerald-400 bg-emerald-600 text-white";
+			default:
+				return "";
+		}
+	}
+
 	// ——————————————————————————————————————————
-	// Initialize map, entity layer, select interactions, and measurement layer.
+	// Initialize map, unit layer, objective layer, select interactions, and measurement layer.
 	// ——————————————————————————————————————————
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
 
 		// 1) Render unit features
-		const features = units.flatMap((unit) =>
+		const unitFeatures = units.flatMap((unit) =>
 			renderEntityFeatures({
 				id: unit.id,
 				name: unit.name,
@@ -142,20 +172,78 @@ function RouteComponent() {
 			}),
 		);
 
-		// 2) Base OSM layer + vector layer for units
-		const vectorLayer = new VectorLayer({ source: vectorSourceRef.current });
+		// 2) Base OSM layer + unit vector layer
+		const unitLayer = new VectorLayer({ source: vectorSourceRef.current });
 		vectorSourceRef.current.clear();
-		vectorSourceRef.current.addFeatures(features);
+		vectorSourceRef.current.addFeatures(unitFeatures);
 
-		// 3) Measurement layer & style
+		// 3) Create objective features and an objective source
+		const objectiveSource = new VectorSource();
+		objectives.forEach((obj) => {
+			const feat = new Feature({
+				geometry: new Point(fromLonLat(obj.position)),
+				letter: obj.letter,
+				state: obj.state,
+				position: obj.position, // store original lon/lat for recentering
+			});
+			objectiveSource.addFeature(feat);
+		});
+
+		// 4) Style function for objectives (circle + text)
+		const objectiveStyleFunction = (featureLike: FeatureLike /*, resolution?: number */) => {
+			// Cast to Feature<Geometry> to access .get()
+			const feat = featureLike as Feature;
+			const state: Objective["state"] = feat.get("state");
+			const letter: string = feat.get("letter");
+
+			let borderColor = "#6B7280"; // gray-500 default
+			let fillColor = "#374151"; // gray-700 default
+			let textColor = "#D1D5DB"; // gray-300 default
+
+			if (state === "capturing") {
+				borderColor = "#FBBF24"; // amber-400
+				fillColor = "#374151";
+				textColor = "#FCD34D"; // amber-300
+			} else if (state === "captured") {
+				borderColor = "#10B981"; // emerald-500
+				fillColor = "#047857"; // emerald-700
+				textColor = "#FFFFFF";
+			}
+
+			return new Style({
+				image: new CircleStyle({
+					radius: 16,
+					stroke: new Stroke({
+						color: borderColor,
+						width: 2,
+					}),
+					fill: new Fill({
+						color: fillColor,
+					}),
+				}),
+				text: new Text({
+					text: letter,
+					fill: new Fill({ color: textColor }),
+					font: "14px sans-serif",
+				}),
+			});
+		};
+
+		// 5) Objective layer
+		const objectiveLayer = new VectorLayer({
+			source: objectiveSource,
+			style: objectiveStyleFunction,
+		});
+
+		// 6) Measurement layer & style
 		measureLayerRef.current = new VectorLayer({
 			source: measureSourceRef.current,
-			style: (feature) => {
-				const geometry = feature.getGeometry() as LineString;
+			style: (feat) => {
+				const geometry = feat.getGeometry() as LineString;
 
 				return new Style({
 					stroke: new Stroke({
-						color: "#fbbf24", // amber-400
+						color: "#fbbf24",
 						width: 2,
 					}),
 					text: new Text({
@@ -169,13 +257,14 @@ function RouteComponent() {
 			},
 		});
 
-		// 4) Create the map
+		// 7) Create the map with all layers
 		const map = new Map({
 			target: mapRef.current,
 			layers: [
 				new TileLayer({ source: new OSM({ attributions: [] }) }),
-				vectorLayer,
-				measureLayerRef.current,
+				unitLayer,
+				objectiveLayer,
+				measureLayerRef.current!,
 			],
 			view: new View({
 				center: fromLonLat([0, 0]),
@@ -185,11 +274,11 @@ function RouteComponent() {
 			controls: [],
 		});
 
-		// 5a) Select interaction for units
+		// 8a) Select interaction for units
 		const selectUnits = new Select({
 			condition: click,
 			style: null,
-			layers: [vectorLayer],
+			layers: [unitLayer],
 		});
 		map.addInteraction(selectUnits);
 		selectUnits.on("select", (e) => {
@@ -197,7 +286,24 @@ function RouteComponent() {
 			setSelectedUnit(unit ?? null);
 		});
 
-		// 5b) Select interaction for measurement deletion
+		// 8b) Select interaction for objectives
+		const selectObjectives = new Select({
+			condition: click,
+			style: null,
+			layers: [objectiveLayer],
+		});
+		map.addInteraction(selectObjectives);
+		selectObjectives.on("select", (e) => {
+			if (e.selected.length > 0) {
+				const feat = e.selected[0];
+				const pos: [number, number] = feat.get("position");
+				centerMapOn(pos);
+			}
+
+			selectObjectives.getFeatures().clear();
+		});
+
+		// 8c) Select interaction for measurement deletion
 		const selectMeasure = new Select({
 			condition: click,
 			style: null,
@@ -213,7 +319,7 @@ function RouteComponent() {
 		});
 
 		mapInstance.current = map;
-	}, [units]);
+	}, [units, objectives]);
 
 	// ——————————————————————————————————————————
 	// Add/remove the Draw interaction when measureActive changes
@@ -222,14 +328,12 @@ function RouteComponent() {
 		const map = mapInstance.current;
 		if (!map) return;
 
-		// Remove any existing Draw interaction
 		if (drawInteractionRef.current) {
 			map.removeInteraction(drawInteractionRef.current);
 			drawInteractionRef.current = null;
 		}
 
 		if (measureActive) {
-			// 1) Create a new Draw interaction for LineString
 			const draw = new Draw({
 				source: measureSourceRef.current,
 				type: "LineString",
@@ -244,14 +348,10 @@ function RouteComponent() {
 
 			map.addInteraction(draw);
 			drawInteractionRef.current = draw;
-
-			// 2) When drawing finishes, compute length, store it, and exit measure mode
 			draw.on("drawend", (evt) => {
 				const feature = evt.feature;
 				const geom = feature.getGeometry() as LineString;
-				const lengthMeters = getLength(geom, {
-					projection: map.getView().getProjection(),
-				});
+				const lengthMeters = getLength(geom, { projection: map.getView().getProjection() });
 				setMeasuredDistance(lengthMeters);
 				setMeasureActive(false);
 			});
@@ -259,7 +359,7 @@ function RouteComponent() {
 	}, [measureActive]);
 
 	// ——————————————————————————————————————————
-	// Keyboard handling for chat (same as before)
+	// Keyboard handling for chat
 	// ——————————————————————————————————————————
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -286,12 +386,10 @@ function RouteComponent() {
 	};
 
 	// ——————————————————————————————————————————
-	// Helper to format a LineString’s length in meters or kilometers
+	// Helper to format a LineString’s length
 	// ——————————————————————————————————————————
 	function formatLength(line: LineString) {
-		const length = getLength(line, {
-			projection: mapInstance.current!.getView().getProjection(),
-		});
+		const length = getLength(line, { projection: mapInstance.current!.getView().getProjection() });
 		if (length > 1000) {
 			return (length / 1000).toFixed(2) + " km";
 		} else {
@@ -299,9 +397,45 @@ function RouteComponent() {
 		}
 	}
 
+	// ——————————————————————————————————————————
+	// Center the map on [lon, lat]
+	// ——————————————————————————————————————————
+	function centerMapOn(pos: [number, number]) {
+		if (!mapInstance.current) return;
+		const view = mapInstance.current.getView();
+		view.animate({
+			center: fromLonLat(pos),
+			duration: 500,
+		});
+	}
+
 	return (
 		<div className="flex flex-1 w-full h-full text-white font-sans">
 			<div className="flex-1 relative">
+				<div className="absolute top-4 left-1/2 transform -translate-x-1/2 flex items-center z-50">
+					{objectives.map((obj, idx) => (
+						<div key={obj.letter} className="flex items-center">
+							<div
+								onClick={() => centerMapOn(obj.position)}
+								className={`
+                  w-8 h-8 rounded-full flex items-center justify-center
+                  border-2 cursor-pointer
+                  ${getCircleClasses(obj.state)}
+                `}
+							>
+								<span className="text-sm font-semibold">{obj.letter}</span>
+							</div>
+							{idx < objectives.length - 1 && (
+								<div className="flex items-center justify-center space-x-1 mx-2">
+									{[0, 1, 2, 3].map((i) => (
+										<div key={i} className="w-1 h-1 bg-gray-500 rounded-full" />
+									))}
+								</div>
+							)}
+						</div>
+					))}
+				</div>
+
 				<div ref={mapRef} className="absolute inset-0 z-0" />
 
 				{selectedUnit && (
@@ -339,7 +473,6 @@ function RouteComponent() {
 						</div>
 					</Panel>
 				)}
-
 				<Panel title="Status Overview" className="absolute bottom-4 left-4 w-64">
 					<div className="space-y-2">
 						<p className="flex items-center gap-1 text-xs">
@@ -356,7 +489,6 @@ function RouteComponent() {
 						</p>
 					</div>
 				</Panel>
-
 				{!showMeasurePanel && (
 					<button
 						onClick={() => setShowMeasurePanel(true)}
