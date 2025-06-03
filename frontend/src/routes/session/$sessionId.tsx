@@ -75,7 +75,9 @@ function Panel({ title, children, className = "", onClose, noClose }: PanelProps
 					)}
 				</div>
 			)}
-			<div className="overflow-auto max-h-full">{children}</div>
+			<div className="flex-1 flex flex-col overflow-auto">
+				{children}
+			</div>
 		</div>
 	);
 }
@@ -92,7 +94,6 @@ function RouteComponent() {
 	const [chatOpen, setChatOpen] = useState(false);
 	const [unread, setUnread] = useState(false);
 
-	// —— Measurement state ——
 	const [showMeasurePanel, setShowMeasurePanel] = useState(false);
 	const [measureActive, setMeasureActive] = useState(false);
 	const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
@@ -100,7 +101,6 @@ function RouteComponent() {
 	const measureSourceRef = useRef<VectorSource>(new VectorSource());
 	const drawInteractionRef = useRef<Draw | null>(null);
 
-	// —— Example objectives (replace with actual positions) ——
 	const [objectives, setObjectives] = useState<Objective[]>([
 		{ letter: "A", state: "captured", position: [-0.1276, 51.5074] }, // London
 		{ letter: "B", state: "capturing", position: [2.3522, 48.8566] }, // Paris
@@ -190,8 +190,7 @@ function RouteComponent() {
 		});
 
 		// 4) Style function for objectives (circle + text)
-		const objectiveStyleFunction = (featureLike: FeatureLike /*, resolution?: number */) => {
-			// Cast to Feature<Geometry> to access .get()
+		const objectiveStyleFunction = (featureLike: FeatureLike) => {
 			const feat = featureLike as Feature;
 			const state: Objective["state"] = feat.get("state");
 			const letter: string = feat.get("letter");
@@ -364,18 +363,17 @@ function RouteComponent() {
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Enter") {
-				setChatOpen((prev) => {
-					if (!prev) setUnread(false);
-
-					return !prev;
-				});
+				if (!chatOpen) {
+					setChatOpen(true);
+					setUnread(false);
+				}
 			}
 		};
 
 		window.addEventListener("keydown", handleKeyDown);
 
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, []);
+	}, [chatOpen]);
 
 	const sendChat = () => {
 		if (chatInput.trim()) {
@@ -561,43 +559,62 @@ function RouteComponent() {
 						className="absolute bottom-0 right-0 m-4 w-80 h-64 flex flex-col z-40"
 						onClose={() => setChatOpen(false)}
 					>
-						<div className="flex-1 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-slate-700">
-							{chatMessages.map((msg, idx) => (
-								<p key={idx} className="text-sm bg-slate-700/50 p-1 rounded text-white">
-									{msg}
-								</p>
-							))}
-						</div>
-						<div className="flex mt-2">
-							<input
-								type="text"
-								value={chatInput}
-								onChange={(e) => setChatInput(e.target.value)}
-								onKeyDown={(e) => e.key === "Enter" && sendChat()}
-								placeholder="Type message..."
-								className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-l outline-none text-xs"
-								autoFocus
-							/>
-							<button
-								onClick={sendChat}
-								className="bg-blue-600 hover:bg-blue-700 px-3 rounded-r text-white text-xs"
-							>
-								Send
-							</button>
+						<div className="relative h-full flex flex-col">
+							{/* Messages area: grows, scrolls, and has pb-12 so it never hides behind the input */}
+							<div className="flex-1 overflow-y-auto space-y-1 pr-1 pb-12">
+								{chatMessages.map((msg, idx) => (
+									<p key={idx} className="text-sm bg-slate-700/50 p-1 rounded text-white">
+										{msg}
+									</p>
+								))}
+							</div>
+
+							<div className="absolute bottom-0 left-0 right-0 flex bg-gray-800/90 p-1">
+								<input
+									type="text"
+									value={chatInput}
+									onChange={(e) => setChatInput(e.target.value)}
+									onKeyDown={(e) => e.key === "Enter" && sendChat()}
+									placeholder="Type message..."
+									className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-l outline-none text-xs"
+									autoFocus
+								/>
+								<button
+									onClick={sendChat}
+									className="bg-blue-600 hover:bg-blue-700 px-3 rounded-r text-white text-xs"
+								>
+									Send
+								</button>
+							</div>
 						</div>
 					</Panel>
 				)}
 
 				{!chatOpen && (
 					<Panel
-						className="absolute bottom-4 right-4 w-auto px-3 py-1 z-50 cursor-pointer animate-pulse"
-						onClose={() => setChatOpen(true)}
+						className="absolute bottom-4 right-4 w-48 px-0 py-0 z-50"
 						noClose
 					>
-						<p className="text-[11px] text-slate-200 flex items-center gap-1">
-							Press <span className="font-medium text-white text-xs">Enter</span> to chat
-							{unread && <span className="w-2 h-2 bg-green-400 rounded-full animate-ping" />}
-						</p>
+						<div className="flex items-center">
+							<input
+								type="text"
+								readOnly
+								value={unread ? "New message…" : "Click to chat"}
+								onClick={() => {
+									setChatOpen(true);
+									setUnread(false);
+								}}
+								className="
+                  w-full
+                  px-2 py-1
+                  bg-slate-800 text-white
+                  rounded-lg
+                  text-xs
+                  cursor-pointer
+                  focus:outline-none
+                "
+							/>
+						</div>
 					</Panel>
 				)}
 			</div>
