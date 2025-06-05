@@ -11,8 +11,12 @@ import VectorSource from "ol/source/Vector";
 import { Style, Stroke } from "ol/style";
 import { useEffect, useRef, useState } from "react";
 
+import { LoadingPageComponent } from "@/features/LoadinPageComponent";
+
 export const Route = createFileRoute("/load-scenario")({
 	component: LoadScenarioPage,
+	pendingComponent: LoadingPageComponent,
+
 });
 
 function LoadScenarioPage() {

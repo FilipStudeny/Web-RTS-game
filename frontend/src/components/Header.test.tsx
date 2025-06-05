@@ -2,22 +2,30 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-// 🧠 Mock Link before importing Header
+// 🧠 Mock the Link component from TanStack Router
 vi.mock("@tanstack/react-router", () => ({
-	Link: ({ to, children }: { to: string, children: React.ReactNode }) => (
-		<a href={to}>{children}</a>
+	Link: ({ to, children, className }: { to: string, children: React.ReactNode, className?: string }) => (
+		<a href={to} className={className}>
+			{children}
+		</a>
 	),
 }));
 
 import Header from "./Header";
 
 describe("Header", () => {
-	it("renders navigation links", () => {
+	it("renders navigation links and user ID", () => {
 		render(<Header />);
 
-		expect(screen.getByText("Home")).toBeInTheDocument();
-		expect(screen.getByText("TanStack Query")).toBeInTheDocument();
-		expect(screen.getByText("Home").closest("a")).toHaveAttribute("href", "/");
-		expect(screen.getByText("TanStack Query").closest("a")).toHaveAttribute("href", "/demo/tanstack-query");
+		const homeLink = screen.getByText("Home");
+		const editorLink = screen.getByText("Editor");
+		const userIdText = screen.getByText(/ID: User-452A/i);
+
+		expect(homeLink).toBeInTheDocument();
+		expect(editorLink).toBeInTheDocument();
+		expect(userIdText).toBeInTheDocument();
+
+		expect(homeLink.closest("a")).toHaveAttribute("href", "/");
+		expect(editorLink.closest("a")).toHaveAttribute("href", "/editor");
 	});
 });
