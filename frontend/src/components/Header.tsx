@@ -1,8 +1,10 @@
+import { useSocketStore } from "@/integrations/stores/useSocketStore";
 import { Link } from "@tanstack/react-router";
 
 // Header.tsx
 export default function Header() {
-	const userId = "User-452A";
+
+	const { userId } = useSocketStore();
 
 	return (
 		<header className="h-16 min-h-16 px-4 flex items-center justify-between bg-slate-900 text-slate-100 shadow-md">

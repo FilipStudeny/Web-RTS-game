@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "generate:proto": "npx protoc --ts_proto_out=./proto --ts_proto_opt=esModuleInterop=true,forceLong=string -I . unit_Types.proto"
+  },
+  "dependencies": {
+    "google-protobuf": "^3.21.4"
+  },
+  "devDependencies": {
+    "ts-proto": "^2.7.3"
+  }
+}

@@ -1,0 +1,153 @@
+[
+    {
+      "type": "infantry",
+      "name": "Infantry",
+      "description": "Standard foot soldiers.",
+      "icon": "infantry.png",
+      "health": 100,
+      "accuracy": 0.7,
+      "sightRange": 150,
+      "movementSpeed": 1.2
+    },
+    {
+      "type": "light_infantry",
+      "name": "Light Infantry",
+      "description": "Fast but lightly armed soldiers.",
+      "icon": "light_infantry.png",
+      "health": 80,
+      "accuracy": 0.6,
+      "sightRange": 140,
+      "movementSpeed": 1.5
+    },
+    {
+      "type": "mechanized_infantry",
+      "name": "Mechanized Infantry",
+      "description": "Infantry with armored transport.",
+      "icon": "mechanized_infantry.png",
+      "health": 130,
+      "accuracy": 0.75,
+      "sightRange": 160,
+      "movementSpeed": 1.4
+    },
+    {
+      "type": "motorized_infantry",
+      "name": "Motorized Infantry",
+      "description": "Infantry with light vehicle support.",
+      "icon": "motorized_infantry.png",
+      "health": 110,
+      "accuracy": 0.7,
+      "sightRange": 155,
+      "movementSpeed": 1.6
+    },
+    {
+      "type": "special_operation_forces",
+      "name": "Special Operations Forces",
+      "description": "Elite units for critical missions.",
+      "icon": "special_operation_forces.png",
+      "health": 90,
+      "accuracy": 0.9,
+      "sightRange": 170,
+      "movementSpeed": 1.8
+    },
+    {
+      "type": "engineers",
+      "name": "Engineers",
+      "description": "Support units for construction or repair.",
+      "icon": "engineers.png",
+      "health": 80,
+      "accuracy": 0.5,
+      "sightRange": 130,
+      "movementSpeed": 1.0
+    },
+    {
+      "type": "artillery",
+      "name": "Artillery",
+      "description": "Long-range fire support.",
+      "icon": "artillery.png",
+      "health": 100,
+      "accuracy": 0.85,
+      "sightRange": 300,
+      "movementSpeed": 0.6
+    },
+    {
+      "type": "mortars",
+      "name": "Mortars",
+      "description": "Short-range indirect fire support.",
+      "icon": "mortars.png",
+      "health": 90,
+      "accuracy": 0.75,
+      "sightRange": 220,
+      "movementSpeed": 0.8
+    },
+    {
+      "type": "anti_tank",
+      "name": "Anti-Tank",
+      "description": "Infantry trained to destroy armor.",
+      "icon": "anti_tank.png",
+      "health": 85,
+      "accuracy": 0.8,
+      "sightRange": 160,
+      "movementSpeed": 1.1
+    },
+    {
+      "type": "headquaters_unit",
+      "name": "Headquarters Unit",
+      "description": "Command and coordination team.",
+      "icon": "headquaters_unit.png",
+      "health": 120,
+      "accuracy": 0.6,
+      "sightRange": 180,
+      "movementSpeed": 1.0
+    },
+    {
+      "type": "light_armour",
+      "name": "Light Armour",
+      "description": "Lightly armored vehicle.",
+      "icon": "light_armour.png",
+      "health": 150,
+      "accuracy": 0.7,
+      "sightRange": 170,
+      "movementSpeed": 2.0
+    },
+    {
+      "type": "wheeled_armour",
+      "name": "Wheeled Armour",
+      "description": "Fast armor on wheels.",
+      "icon": "wheeled_armour.png",
+      "health": 180,
+      "accuracy": 0.75,
+      "sightRange": 175,
+      "movementSpeed": 1.9
+    },
+    {
+      "type": "medium_armour",
+      "name": "Medium Armour",
+      "description": "Balanced armored vehicle.",
+      "icon": "medium_armour.png",
+      "health": 220,
+      "accuracy": 0.8,
+      "sightRange": 180,
+      "movementSpeed": 1.5
+    },
+    {
+      "type": "heavy_armour",
+      "name": "Heavy Armour",
+      "description": "Heavily protected tank.",
+      "icon": "heavy_armour.png",
+      "health": 300,
+      "accuracy": 0.85,
+      "sightRange": 190,
+      "movementSpeed": 1.0
+    },
+    {
+      "type": "armour",
+      "name": "Armour",
+      "description": "General armored unit.",
+      "icon": "armour.png",
+      "health": 250,
+      "accuracy": 0.8,
+      "sightRange": 185,
+      "movementSpeed": 1.3
+    }
+  ]
+  

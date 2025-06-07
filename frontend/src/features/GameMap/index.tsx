@@ -193,5 +193,5 @@ export function GameMap({
 		}
 	}, [measureActive]);
 
-	return <div ref={mapRef} className="absolute inset-0 z-0" />;
+	return <div data-testid="map-container" ref={mapRef} className="absolute inset-0 z-0" />;
 }

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package models;
+
+message UnitType {
+  string type = 1;
+  string name = 2;
+  string description = 3;
+  string icon = 4;
+  uint32 health = 5;
+  float accuracy = 6;
+  float sight_range = 7;
+  float movement_speed = 8;
+}
+
+message UnitTypeList {
+  repeated UnitType unit_types = 1;
+}

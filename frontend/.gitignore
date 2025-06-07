@@ -5,3 +5,4 @@ dist-ssr
 *.local
 public/images/scenario-editor.jpg
 public/images/load-scenario.jpg
+shared/node_modules

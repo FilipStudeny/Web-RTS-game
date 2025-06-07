@@ -5,6 +5,7 @@ import Header from "../components/Header";
 
 import type { QueryClient } from "@tanstack/react-query";
 
+import { LoadingPageComponent } from "@/features/LoadinPageComponent";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
 
 interface MyRouterContext {
@@ -14,15 +15,11 @@ interface MyRouterContext {
 export const Route = createRootRouteWithContext<MyRouterContext>()({
 	component: AppLayout,
 	errorComponent: () => (
-		<div className="flex flex-col items-center justify-center h-screen text-red-600 text-xl">
-			<p className="mb-4">Connection to the server failed.</p>
-			<button
-				className="bg-red-600 text-white px-4 py-2 rounded"
-				onClick={() => window.location.reload()}
-			>
-				Retry
-			</button>
-		</div>
+		<LoadingPageComponent
+			error
+			message="Connection to the server failed."
+			onRetry={() => window.location.reload()}
+		/>
 	),
 });
 
@@ -34,11 +31,7 @@ function AppLayout() {
 	}, []);
 
 	if (status === "idle" || status === "connecting") {
-		return (
-			<div className="flex items-center justify-center h-screen text-xl text-gray-700">
-				Connecting to server...
-			</div>
-		);
+		return <LoadingPageComponent message="Connecting to server..." />;
 	}
 
 	if (status === "error") {
@@ -46,11 +39,7 @@ function AppLayout() {
 	}
 
 	if (!userId) {
-		return (
-			<div className="flex items-center justify-center h-screen text-xl text-gray-700">
-				Awaiting user ID...
-			</div>
-		);
+		return <LoadingPageComponent message="Awaiting user ID..." />;
 	}
 
 	return (
