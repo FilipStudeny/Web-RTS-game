@@ -10,7 +10,7 @@ export type Entity = {
 	id: string,
 	name: string,
 	type: "infantry" | "tank" | "armour" | "recon",
-	side: "friendly" | "enemy",
+	side: "friendly" | "enemy" | "ally",
 	health: number,
 	lon: number,
 	lat: number,
@@ -37,7 +37,7 @@ export const renderEntityFeatures = (entity: Entity): Feature<Geometry>[] => {
 	const iconStyle = new Style({
 		image: new Icon({
 			src: `/images/units/${entity.type}.png`,
-			scale: 0.05, // smaller icon
+			scale: 0.05,
 			color: `rgb(${tint.join(",")})`,
 			anchor: [0.5, 0.5],
 			anchorXUnits: "fraction",
@@ -64,4 +64,28 @@ export const renderEntityFeatures = (entity: Entity): Feature<Geometry>[] => {
 	);
 
 	return [circleFeature, iconFeature];
+};
+
+export const getUnitStyle = (
+	icon: string,
+	side: string,
+	selected: boolean,
+): Style => {
+	const color = selected
+		? "rgba(100, 200, 255, 0.6)"
+		: side === "enemy"
+			? "rgba(255, 100, 100, 0.4)"
+			: undefined;
+
+	return new Style({
+		image: new Icon({
+			src: `/images/units/${icon.toLowerCase()}.png`,
+			scale: selected ? 0.065 : 0.05,
+			anchor: [0.5, 0.5],
+			anchorXUnits: "fraction",
+			anchorYUnits: "fraction",
+			color,
+		}),
+		zIndex: selected ? 100 : 1,
+	});
 };
