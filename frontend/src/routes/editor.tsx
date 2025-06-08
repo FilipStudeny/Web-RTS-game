@@ -16,10 +16,12 @@ import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
-import { Fill, Stroke, Style, Text } from "ol/style";
+import { Fill, Stroke, Style, Text, Icon } from "ol/style";
 import { useEffect, useRef, useState } from "react";
 
-import { UnitTypeList } from "../../../shared/proto/unit_Types";
+import { UnitTypeList } from "@/actions/proto/unit_Types";
+import { UnitInfoPanel } from "@/features/UnitDetailPanel";
+
 const useUnitTypes = () => {
 	return useQuery({
 		queryKey: ["unit-types"],
@@ -39,7 +41,6 @@ const useUnitTypes = () => {
 export const Route = createFileRoute("/editor")({
 	component: EditorPage,
 });
-
 function EditorPage() {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<null | Map>(null);
@@ -48,15 +49,27 @@ function EditorPage() {
 	const [selectedFeature, setSelectedFeature] = useState<any>(null);
 	const [playableAreaDrawn, setPlayableAreaDrawn] = useState(false);
 	const [scenarioName, setScenarioName] = useState("");
+	const [selectedUnitType, setSelectedUnitType] = useState<string | null>(null);
+	const [selectedUnitSide, setSelectedUnitSide] = useState<"ally" | "enemy">("ally");
 	const [error, setError] = useState<string | null>(null);
 
-	const { data: unitTypes, isLoading, errors } = useUnitTypes();
+	const { data: unitTypes } = useUnitTypes();
+	const selectedFeatureRef = useRef<any>(null);
 
 	useEffect(() => {
-		if (unitTypes) {
-			console.log("Fetched unit types from backend:", unitTypes);
-		}
+		if (!unitTypes) return;
+		unitTypes.forEach((unit) => {
+			const img = new Image();
+			img.src = `/images/units/${unit.icon.toLowerCase()}.png`;
+		});
 	}, [unitTypes]);
+
+	useEffect(() => {
+		selectedFeatureRef.current = selectedFeature;
+		mapInstance.current?.getLayers().forEach((layer) => {
+			if (layer instanceof VectorLayer) layer.changed();
+		});
+	}, [selectedFeature]);
 
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
@@ -65,19 +78,44 @@ function EditorPage() {
 			source: vectorSourceRef.current,
 			style: (feature) => {
 				const type = feature.get("type");
+				const isSelected = selectedFeatureRef.current === feature;
+
+				if (type === "unit") {
+					const icon = feature.get("unitIcon") ?? "default";
+					const iconSrc = `/images/units/${icon.toLowerCase()}.png`;
+					const side = feature.get("side") ?? "ally";
+					const color = isSelected
+						? "rgba(100, 200, 255, 0.6)"
+						: side === "enemy"
+							? "rgba(255, 100, 100, 0.4)"
+							: undefined;
+
+					return new Style({
+						image: new Icon({
+							src: iconSrc,
+							scale: isSelected ? 0.065 : 0.05,
+							anchor: [0.5, 0.5],
+							anchorXUnits: "fraction",
+							anchorYUnits: "fraction",
+							color,
+						}),
+						zIndex: isSelected ? 100 : 1,
+					});
+				}
+
 				let fillColor = "rgba(0, 0, 255, 0.1)";
 				let strokeColor = "#cbd5e1";
 				let textLabel = type?.toUpperCase() || "";
 
 				if (type === "city") {
-					fillColor = "rgba(255, 165, 0, 0.3)";
-					strokeColor = "#f97316";
+					fillColor = isSelected ? "rgba(255, 165, 0, 0.5)" : "rgba(255, 165, 0, 0.3)";
+					strokeColor = isSelected ? "#fb923c" : "#f97316";
 				} else if (type === "forest") {
-					fillColor = "rgba(34, 139, 34, 0.3)";
-					strokeColor = "#22c55e";
+					fillColor = isSelected ? "rgba(34, 197, 94, 0.5)" : "rgba(34, 139, 34, 0.3)";
+					strokeColor = isSelected ? "#86efac" : "#22c55e";
 				} else if (type === "playable") {
 					fillColor = "rgba(0, 0, 0, 0)";
-					strokeColor = "#0ea5e9";
+					strokeColor = isSelected ? "#38bdf8" : "#0ea5e9";
 					const widthKm = feature.get("widthKm");
 					const heightKm = feature.get("heightKm");
 					textLabel = `PLAYABLE AREA\n${widthKm} × ${heightKm} km`;
@@ -101,15 +139,12 @@ function EditorPage() {
 
 		const map = new Map({
 			target: mapRef.current,
-			layers: [
-				new TileLayer({ source: new OSM({ attributions: [] }) }),
-				vectorLayer,
-			],
+			layers: [new TileLayer({ source: new OSM({ attributions: [] }) }), vectorLayer],
 			view: new View({ center: [0, 0], zoom: 2 }),
 			controls: [],
 		});
 
-		const select = new Select({ condition: click });
+		const select = new Select({ condition: click, style: null });
 		map.addInteraction(select);
 		select.on("select", (e) => {
 			setSelectedFeature(e.selected[0] || null);
@@ -120,31 +155,43 @@ function EditorPage() {
 
 	useEffect(() => {
 		if (!mapInstance.current) return;
-
 		mapInstance.current.getInteractions().forEach((interaction) => {
-			if (interaction instanceof Draw) {
-				mapInstance.current!.removeInteraction(interaction);
-			}
+			if (interaction instanceof Draw) mapInstance.current!.removeInteraction(interaction);
 		});
+		if (!drawType || !playableAreaDrawn) return;
 
-		if (drawType && playableAreaDrawn) {
-			const draw = new Draw({
-				source: vectorSourceRef.current,
-				type: "Polygon",
-			});
+		const source = vectorSourceRef.current;
+
+		if (drawType === "unit") {
+			const draw = new Draw({ source, type: "Point" });
 			draw.on("drawend", (e) => {
-				e.feature.set("type", drawType);
+				e.feature.set("type", "unit");
+				e.feature.set("unitIcon", selectedUnitType ?? "default");
+				e.feature.set("side", selectedUnitSide);
 			});
 			mapInstance.current.addInteraction(draw);
+
+			return;
 		}
-	}, [drawType, playableAreaDrawn]);
+
+		const draw = new Draw({ source, type: "Polygon" });
+		draw.on("drawend", (e) => {
+			e.feature.set("type", drawType);
+		});
+		mapInstance.current.addInteraction(draw);
+	}, [drawType, playableAreaDrawn, selectedUnitType, selectedUnitSide]);
+
+	useEffect(() => {
+		mapInstance.current?.getLayers().forEach((layer) => {
+			if (layer instanceof VectorLayer) layer.changed();
+		});
+	}, [selectedFeature]);
 
 	const deleteSelectedFeature = () => {
 		if (selectedFeature) {
 			const isPlayableArea = selectedFeature.get("type") === "playable";
 			vectorSourceRef.current.removeFeature(selectedFeature);
 			setSelectedFeature(null);
-
 			if (isPlayableArea) {
 				setPlayableAreaDrawn(false);
 				setDrawType(null);
@@ -154,14 +201,9 @@ function EditorPage() {
 
 	const drawPlayableArea = () => {
 		if (!mapInstance.current) return;
-
 		setError(null);
 
-		const draw = new Draw({
-			source: vectorSourceRef.current,
-			type: "Circle",
-			geometryFunction: createBox(),
-		});
+		const draw = new Draw({ source: vectorSourceRef.current, type: "Circle", geometryFunction: createBox() });
 		mapInstance.current.addInteraction(draw);
 
 		draw.on("drawend", (e) => {
@@ -188,21 +230,37 @@ function EditorPage() {
 		});
 	};
 
+	const selectedUnitData = selectedFeature?.get("type") === "unit" && unitTypes
+		? unitTypes.find((u) => u.icon === selectedFeature.get("unitIcon"))
+		: null;
+
 	return (
 		<div className="flex flex-1 w-full h-full text-white">
-			<div className="w-2/3 h-full border-r border-slate-700">
+			<div className="w-2/3 h-full border-r border-slate-700 relative">
 				<div ref={mapRef} className="w-full h-full" />
+				{selectedFeature && selectedUnitData && (
+					<UnitInfoPanel
+						unit={{
+							id: selectedFeature.ol_uid.toString(),
+							name: selectedUnitData.name,
+							health: selectedUnitData.health,
+							accuracy: selectedUnitData.accuracy,
+							sightRange: selectedUnitData.sightRange,
+							movementSpeed: selectedUnitData.movementSpeed,
+							position: selectedFeature.getGeometry()?.getCoordinates() || [0, 0],
+							type: selectedUnitData.icon,
+							side: selectedFeature.get("side") || "ally",
+						}}
+						onClose={() => setSelectedFeature(null)}
+					/>
+				)}
 			</div>
 
 			<div className="w-1/3 h-full flex flex-col gap-4 p-4 bg-slate-900 shadow-inner overflow-hidden">
-				<h2 className="text-2xl font-bold text-center border-b border-slate-700 pb-2">
-					Scenario Editor
-				</h2>
+				<h2 className="text-2xl font-bold text-center border-b border-slate-700 pb-2">Scenario Editor</h2>
 
 				<div className="flex flex-col gap-1">
-					<label htmlFor="scenario-name" className="text-sm font-semibold text-slate-300">
-						Scenario Name
-					</label>
+					<label htmlFor="scenario-name" className="text-sm font-semibold text-slate-300">Scenario Name</label>
 					<input
 						id="scenario-name"
 						type="text"
@@ -224,9 +282,7 @@ function EditorPage() {
 						>
 							<MousePointerSquareDashed className="w-5 h-5" /> Draw Playable Area
 						</button>
-						{error && (
-							<p className="text-xs text-red-500 text-center">{error}</p>
-						)}
+						{error && <p className="text-xs text-red-500 text-center">{error}</p>}
 					</>
 				)}
 
@@ -253,6 +309,33 @@ function EditorPage() {
 				>
 					<ShieldPlus className="w-5 h-5" /> Place Unit
 				</button>
+
+				{drawType === "unit" && (
+					<>
+						<select
+							value={selectedUnitType ?? ""}
+							onChange={(e) => setSelectedUnitType(e.target.value)}
+							className="bg-slate-800 text-white rounded px-3 py-2 border border-slate-600"
+						>
+							<option value="" disabled>Select Unit Type</option>
+							{unitTypes?.map((u) => (
+								<option key={u.type} value={u.icon}>{u.name}</option>
+							))}
+						</select>
+
+						<div className="flex gap-2 items-center">
+							<label className="text-sm text-slate-300 font-semibold">Side:</label>
+							<select
+								value={selectedUnitSide}
+								onChange={(e) => setSelectedUnitSide(e.target.value as "ally" | "enemy")}
+								className="bg-slate-800 text-white rounded px-3 py-2 border border-slate-600"
+							>
+								<option value="ally">Ally</option>
+								<option value="enemy">Enemy</option>
+							</select>
+						</div>
+					</>
+				)}
 
 				<button
 					onClick={() => setDrawType(null)}

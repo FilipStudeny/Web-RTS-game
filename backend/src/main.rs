@@ -101,8 +101,7 @@ struct RawUnitType {
     movement_speed: f32,
 }
 
-async fn list_unit_types_protobuf() -> impl IntoResponse {
-    println!("Current directory: {:?}", std::env::current_dir());
+pub async fn list_unit_types_protobuf() -> impl IntoResponse {
     let json_path = Path::new("../shared/units-config.json");
 
     let json_data = match fs::read_to_string(json_path) {
@@ -134,7 +133,7 @@ async fn list_unit_types_protobuf() -> impl IntoResponse {
     };
 
     let mut buffer = Vec::new();
-    if ProstMessage::encode(&unit_list, &mut buffer).is_err() {
+    if unit_list.encode(&mut buffer).is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, "Protobuf encoding failed").into_response();
     }
 
