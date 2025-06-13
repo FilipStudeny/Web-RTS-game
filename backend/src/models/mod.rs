@@ -3,18 +3,21 @@ use uuid::Uuid;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/models.rs"));
+    include!(concat!(env!("OUT_DIR"), "/area_models.rs"));
 }
 #[derive(serde::Deserialize)]
-struct RawUnitType {
+pub struct RawUnitType {
     #[serde(rename = "type")]
-    type_: String,
-    name: String,
-    description: String,
-    icon: String,
-    health: u32,
-    accuracy: f32,
-    sight_range: f32,
-    movement_speed: f32,
+    pub type_: String,
+    pub name: String,
+    pub description: String,
+    pub icon: String,
+    pub health: u32,
+    pub accuracy: f32,
+    #[serde(rename = "sightRange")]
+    pub sight_range: f32,
+    #[serde(rename = "movementSpeed")]
+    pub movement_speed: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

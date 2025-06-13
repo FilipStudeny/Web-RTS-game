@@ -2,7 +2,7 @@ import Feature from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
 import { click } from "ol/events/condition";
-import { Point, LineString } from "ol/geom";
+import { Point, LineString, Polygon } from "ol/geom";
 import { Draw, Select } from "ol/interaction";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
@@ -11,187 +11,114 @@ import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
 import { getLength } from "ol/sphere";
 import { Style, Stroke, Fill, Text, Circle as CircleStyle } from "ol/style";
-import { useEffect, useRef } from "react";
+import { useRef, useEffect } from "react";
 
-import type { Objective } from "../ObjectiveBar";
-import type { Unit } from "../UnitDetailPanel";
-
+import { type Objective } from "@/features/ObjectiveBar";
+import { type Unit } from "@/features/UnitDetailPanel";
+import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { renderEntityFeatures, type Entity } from "@/utils/renderEntity";
+
+const getAreaStyle = createAreaStyleFactory([
+	{ type: "city", label: "CITY", color: "#f97316", fill: true },
+	{ type: "forest", label: "FOREST", color: "#22c55e", fill: true },
+]);
+
+export interface Area {
+	id: string,
+	type: "city" | "forest",
+	coords: Array<Array<[number, number]>>,
+}
 
 type GameMapProps = {
 	units: Unit[],
 	objectives: Objective[],
+	areas: Area[],
 	measureActive: boolean,
 	onSelectUnit: (unit: Unit | null)=> void,
 	onMeasure?: (distance: number)=> void,
 	setMapInstance?: (map: Map)=> void,
 };
 
-export function GameMap({
-	units,
-	objectives,
-	measureActive,
-	onSelectUnit,
-	onMeasure,
-	setMapInstance,
-}: GameMapProps) {
+export function GameMap({ units, objectives, areas, measureActive, onSelectUnit, onMeasure, setMapInstance }: GameMapProps) {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
-	const unitSourceRef = useRef(new VectorSource());
-	const objectiveSourceRef = useRef(new VectorSource());
-	const measureSourceRef = useRef(new VectorSource());
+	const unitSource = useRef(new VectorSource()).current;
+	const objectiveSource = useRef(new VectorSource()).current;
+	const areaSource = useRef(new VectorSource()).current;
+	const measureSource = useRef(new VectorSource()).current;
 	const measureLayerRef = useRef<VectorLayer<any> | null>(null);
-	const drawInteractionRef = useRef<Draw | null>(null);
+	const drawRef = useRef<Draw | null>(null);
 
-	// Create map + layers
+	// Initialize map and layers once
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
 
-		const unitFeatures = units.flatMap((unit) =>
-			renderEntityFeatures({
-				id: unit.id,
-				name: unit.name,
-				type: unit.type as Entity["type"],
-				side: unit.side,
-				health: unit.health,
-				lon: unit.position[0],
-				lat: unit.position[1],
-				active: unit.health > 0,
-				sightRange: unit.sightRange,
-			}),
-		);
-		unitSourceRef.current.clear();
-		unitSourceRef.current.addFeatures(unitFeatures);
+		const areaLayer = new VectorLayer({ source: areaSource, style: f => getAreaStyle(f, false) });
+		const unitLayer = new VectorLayer({ source: unitSource });
+		const objLayer = new VectorLayer({ source: objectiveSource, style: feature => {
+			const state = feature.get("state"); const letter = feature.get("letter");
+			let fill = "#374151", stroke = "#6B7280", text = "#D1D5DB";
+			if (state === "capturing") [stroke, text] = ["#FBBF24", "#FCD34D"];
+			else if (state === "captured") [fill, stroke, text] = ["#047857", "#10B981", "#ffffff"];
 
-		objectiveSourceRef.current.clear();
-		objectives.forEach((obj) => {
-			const feat = new Feature({
-				geometry: new Point(fromLonLat(obj.position)),
-				letter: obj.letter,
-				state: obj.state,
-				position: obj.position,
+			return new Style({
+				image: new CircleStyle({ radius: 16, fill: new Fill({ color: fill }), stroke: new Stroke({ color: stroke, width: 2 }) }),
+				text: new Text({ text: letter, font: "14px sans-serif", fill: new Fill({ color: text }) }),
 			});
-			objectiveSourceRef.current.addFeature(feat);
-		});
+		} });
+		const measureLayer = new VectorLayer({ source: measureSource, style: feat => {
+			const len = getLength(feat.getGeometry() as LineString);
+			const txt = len > 1000 ? `${(len / 1000).toFixed(2)} km` : `${Math.round(len)} m`;
 
-		const map = new Map({
-			target: mapRef.current,
-			layers: [
-				new TileLayer({ source: new OSM({ attributions: [] }) }),
-				new VectorLayer({ source: unitSourceRef.current }),
-				new VectorLayer({
-					source: objectiveSourceRef.current,
-					style: (feature) => {
-						const state = feature.get("state");
-						const letter = feature.get("letter");
-						let fillColor = "#374151";
-						let strokeColor = "#6B7280";
-						let textColor = "#D1D5DB";
+			return new Style({ stroke: new Stroke({ color: "#fbbf24", width: 2 }), text: new Text({ text: txt, font: "12px sans-serif", fill: new Fill({ color: "#fff" }), stroke: new Stroke({ color: "#000", width: 2 }), offsetY: -10 }) });
+		} });
+		measureLayerRef.current = measureLayer;
 
-						if (state === "capturing") {
-							strokeColor = "#FBBF24";
-							textColor = "#FCD34D";
-						} else if (state === "captured") {
-							strokeColor = "#10B981";
-							fillColor = "#047857";
-							textColor = "#ffffff";
-						}
+		const map = new Map({ target: mapRef.current, layers: [new TileLayer({ source: new OSM({ attributions: [] }) }), areaLayer, unitLayer, objLayer, measureLayer], view: new View({ center: fromLonLat([0, 0]), zoom: 3 }), controls: [] });
 
-						return new Style({
-							image: new CircleStyle({
-								radius: 16,
-								fill: new Fill({ color: fillColor }),
-								stroke: new Stroke({ color: strokeColor, width: 2 }),
-							}),
-							text: new Text({
-								text: letter,
-								font: "14px sans-serif",
-								fill: new Fill({ color: textColor }),
-							}),
-						});
-					},
-				}),
-				(measureLayerRef.current = new VectorLayer({
-					source: measureSourceRef.current,
-					style: (feature) => {
-						const geom = feature.getGeometry() as LineString;
-						const length = getLength(geom);
-
-						return new Style({
-							stroke: new Stroke({ color: "#fbbf24", width: 2 }),
-							text: new Text({
-								text: length > 1000 ? `${(length / 1000).toFixed(2)} km` : `${Math.round(length)} m`,
-								fill: new Fill({ color: "#fff" }),
-								stroke: new Stroke({ color: "#000", width: 2 }),
-								font: "12px sans-serif",
-								offsetY: -10,
-							}),
-						});
-					},
-				})),
-			],
-			view: new View({
-				center: fromLonLat([0, 0]),
-				zoom: 3,
-				minResolution: 0.5,
-			}),
-			controls: [],
-		});
-
-		// Unit selection
-		const selectUnits = new Select({
-			condition: click,
-			style: null,
-			layers: (layer) => layer.getSource() === unitSourceRef.current,
-		});
+		// Selection
+		const selectUnits = new Select({ condition: click, layers: [unitLayer], style: null });
+		selectUnits.on("select", e => onSelectUnit(e.selected[0]?.get("unitData") ?? null));
 		map.addInteraction(selectUnits);
-		selectUnits.on("select", (e) => {
-			onSelectUnit(e.selected[0]?.get("unitData") ?? null);
-		});
-
-		// Measurement delete on click
-		const selectMeasure = new Select({
-			condition: click,
-			style: null,
-			layers: [measureLayerRef.current],
-		});
+		const selectMeasure = new Select({ condition: click, layers: [measureLayer], style: null });
+		selectMeasure.on("select", e => { e.selected.forEach(f => measureSource.removeFeature(f)); onMeasure?.(0); selectMeasure.getFeatures().clear(); });
 		map.addInteraction(selectMeasure);
-		selectMeasure.on("select", (e) => {
-			e.selected.forEach((feat) => measureSourceRef.current.removeFeature(feat));
-			onMeasure?.(0);
-			selectMeasure.getFeatures().clear();
-		});
 
 		mapInstance.current = map;
 		setMapInstance?.(map);
 	}, []);
 
-	// Handle draw interaction
+	// Render areas when prop changes
 	useEffect(() => {
-		const map = mapInstance.current;
-		if (!map) return;
+		if (!mapInstance.current) return;
+		areaSource.clear();
+		areas.forEach(area => area.coords.forEach(ring => {
+			const coords = ring.map(([lon, lat]) => fromLonLat([lon, lat]));
+			const feat = new Feature(new Polygon([coords])); feat.set("type", area.type);
+			areaSource.addFeature(feat);
+		}));
+	}, [areas]);
 
-		if (drawInteractionRef.current) {
-			map.removeInteraction(drawInteractionRef.current);
-			drawInteractionRef.current = null;
-		}
+	// Render units and objectives when props change
+	useEffect(() => {
+		if (!mapInstance.current) return;
+		unitSource.clear();
+		unitSource.addFeatures(units.flatMap(u => renderEntityFeatures({ id: u.id, name: u.name, type: u.type as Entity["type"], side: u.side, health: u.health, lon: u.position[0], lat: u.position[1], active: u.health > 0, sightRange: u.sightRange })));
+		objectiveSource.clear();
+		objectives.forEach(obj => { const f = new Feature(new Point(fromLonLat(obj.position))); f.set("letter", obj.letter); f.set("state", obj.state); objectiveSource.addFeature(f); });
+	}, [units, objectives]);
+
+	// Measure interaction
+	useEffect(() => {
+		const map = mapInstance.current; if (!map) return;
+		if (drawRef.current) { map.removeInteraction(drawRef.current); drawRef.current = null; }
 
 		if (measureActive) {
-			const draw = new Draw({
-				source: measureSourceRef.current,
-				type: "LineString",
-				maxPoints: 2,
-				style: new Style({ stroke: new Stroke({ color: "#fbbf24", width: 2 }) }),
-			});
-			map.addInteraction(draw);
-			drawInteractionRef.current = draw;
-
-			draw.on("drawend", (e) => {
-				const length = getLength(e.feature.getGeometry() as LineString);
-				onMeasure?.(length);
-			});
+			const draw = new Draw({ source: measureSource, type: "LineString", maxPoints:2 });
+			map.addInteraction(draw); drawRef.current = draw;
+			draw.on("drawend", e => onMeasure?.(getLength(e.feature.getGeometry() as LineString)));
 		}
 	}, [measureActive]);
 
-	return <div data-testid="map-container" ref={mapRef} className="absolute inset-0 z-0" />;
+	return <div ref={mapRef} className="absolute inset-0 z-0" data-testid="map-container" />;
 }

@@ -1,0 +1,66 @@
+[
+  {
+    "name": "City",
+    "description": "Urban area with dense buildings and roads.",
+    "color": "#6366F1",
+    "movement_speed_modifier": 0.9,
+    "accuracy_modifier": 1.1,
+    "enemy_miss_chance": 0.1
+  },
+  {
+    "name": "Forest",
+    "description": "Dense vegetation providing cover and concealment.",
+    "color": "#16A34A",
+    "movement_speed_modifier": 0.7,
+    "accuracy_modifier": 0.9,
+    "enemy_miss_chance": 0.25
+  },
+  {
+    "name": "Swamp",
+    "description": "Wet and muddy terrain, difficult to traverse.",
+    "color": "#6EE7B7",
+    "movement_speed_modifier": 0.5,
+    "accuracy_modifier": 0.8,
+    "enemy_miss_chance": 0.2
+  },
+  {
+    "name": "Open Field",
+    "description": "Flat and unobstructed terrain, good visibility.",
+    "color": "#FACC15",
+    "movement_speed_modifier": 1.0,
+    "accuracy_modifier": 1.0,
+    "enemy_miss_chance": 0.05
+  },
+  {
+    "name": "Desert",
+    "description": "Hot, sandy terrain with limited cover.",
+    "color": "#FBBF24",
+    "movement_speed_modifier": 0.8,
+    "accuracy_modifier": 0.95,
+    "enemy_miss_chance": 0.1
+  },
+  {
+    "name": "Hills",
+    "description": "Elevated terrain that gives a visibility advantage.",
+    "color": "#10B981",
+    "movement_speed_modifier": 0.85,
+    "accuracy_modifier": 1.2,
+    "enemy_miss_chance": 0.15
+  },
+  {
+    "name": "Mountains",
+    "description": "Rugged terrain, hard to move through but offers cover.",
+    "color": "#4B5563",
+    "movement_speed_modifier": 0.6,
+    "accuracy_modifier": 1.15,
+    "enemy_miss_chance": 0.3
+  },
+  {
+    "name": "Snowfield",
+    "description": "Cold and slippery terrain with reduced visibility.",
+    "color": "#93C5FD",
+    "movement_speed_modifier": 0.7,
+    "accuracy_modifier": 0.9,
+    "enemy_miss_chance": 0.2
+  }
+]

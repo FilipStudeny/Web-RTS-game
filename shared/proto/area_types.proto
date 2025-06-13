@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package area_models;
+
+message Area {
+    string name = 1;
+    string description = 2;
+    string color = 3;
+    float movement_speed_modifier = 4;   // e.g., 0.8 means 80% speed
+    float accuracy_modifier = 5;         // e.g., 1.1 means 110% accuracy
+    float enemy_miss_chance = 6;         // e.g., 0.2 means 20% chance to miss
+  }
+
+message AreaList {
+  repeated Area areas = 1;
+}

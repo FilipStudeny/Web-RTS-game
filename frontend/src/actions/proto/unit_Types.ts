@@ -2,7 +2,7 @@
 // versions:
 //   protoc-gen-ts_proto  v2.7.3
 //   protoc               v3.20.3
-// source: unit_Types.proto
+// source: unit_types.proto
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";

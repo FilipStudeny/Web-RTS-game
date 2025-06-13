@@ -1,234 +1,269 @@
-import { useQuery } from "@tanstack/react-query";
+// src/features/ScenarioEditor.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import Map from "ol/Map";
 import View from "ol/View";
 import { click } from "ol/events/condition";
+import { Point } from "ol/geom";
 import { Draw, Select } from "ol/interaction";
-import { createBox } from "ol/interaction/Draw";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
+import { toLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
+import { Style, Stroke, Fill, Text, Circle as CircleStyle } from "ol/style";
 import { useEffect, useRef, useState } from "react";
 
-import { UnitTypeList } from "@/actions/proto/unit_Types";
+import { useGetEditorAreaTypes } from "@/actions/getEditorAreaTypes";
+import { useGetEditorUnitTypes } from "@/actions/getEditorUnitTypes";
+import { AreaInfoPanel } from "@/features/AreaInfoPanel";
 import EditorSidebar from "@/features/EditorSidebar";
+import { ObjectiveBar } from "@/features/ObjectiveBar";
 import { UnitInfoPanel } from "@/features/UnitDetailPanel";
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
 
-const useUnitTypes = () => {
-	return useQuery({
-		queryKey: ["unit-types"],
-		queryFn: async () => {
-			const res = await fetch("http://localhost:9999/api/unit-types.pb");
-			if (!res.ok) throw new Error("Failed to fetch unit types");
-
-			const arrayBuffer = await res.arrayBuffer();
-			const bytes = new Uint8Array(arrayBuffer);
-			const decoded = UnitTypeList.decode(bytes);
-
-			return decoded.unitTypes;
-		},
-	});
+export type Objective = {
+	letter: string,
+	state: "neutral" | "capturing" | "captured",
+	position: [number, number], // [lon, lat]
 };
 
-const areaConfigs = [
-	{ type: "city", label: "CITY", color: "#f97316", fill: true },
-	{ type: "forest", label: "FOREST", color: "#22c55e", fill: true },
-	{ type: "playable", label: "PLAYABLE AREA", color: "#0ea5e9", fill: false }, // 👈 no fill
-];
-
-const getAreaStyle = createAreaStyleFactory(areaConfigs);
+type DrawMode = string | null;
 
 export const Route = createFileRoute("/editor")({
-	component: EditorPage,
+	component: ScenarioEditor,
 });
 
-function EditorPage() {
-	const mapRef = useRef<HTMLDivElement | null>(null);
-	const mapInstance = useRef<null | Map>(null);
-	const vectorSourceRef = useRef(new VectorSource());
-	const [drawType, setDrawType] = useState<"city" | "forest" | "unit" | null>(null);
-	const [selectedFeature, setSelectedFeature] = useState<any>(null);
-	const [playableAreaDrawn, setPlayableAreaDrawn] = useState(false);
-	const [scenarioName, setScenarioName] = useState("");
-	const [selectedUnitType, setSelectedUnitType] = useState<string | null>(null);
-	const [selectedUnitSide, setSelectedUnitSide] = useState<"ally" | "enemy">("ally");
-	const [error, setError] = useState<string | null>(null);
+export default function ScenarioEditor() {
+	const mapContainerRef = useRef<HTMLDivElement | null>(null);
+	const mapInstanceRef = useRef<Map | null>(null);
+	const featureSourceRef = useRef(new VectorSource());
+	const selectionRef = useRef<any>(null);
 
-	const { data: unitTypes } = useUnitTypes();
-	const selectedFeatureRef = useRef<any>(null);
+	const [activeDrawMode, setActiveDrawMode] = useState<DrawMode>(null);
+	const [activeFeature, setActiveFeature] = useState<any>(null);
+	const [scenarioTitle, setScenarioTitle] = useState("");
+	const [chosenUnitType, setChosenUnitType] = useState<string | null>(null);
+	const [chosenUnitSide, setChosenUnitSide] = useState<"ally" | "enemy">("ally");
+	const [objectives, setObjectives] = useState<Objective[]>([]);
 
+	const { data: availableUnitTypes } = useGetEditorUnitTypes();
+	const { data: availableAreas } = useGetEditorAreaTypes();
+
+	// preload unit icons
 	useEffect(() => {
-		if (!unitTypes) return;
-		unitTypes.forEach((unit) => {
+		if (!availableUnitTypes) return;
+		availableUnitTypes.forEach((unit) => {
 			const img = new Image();
 			img.src = `/images/units/${unit.icon.toLowerCase()}.png`;
 		});
-	}, [unitTypes]);
+	}, [availableUnitTypes]);
 
+	const getAreaStyle = useRef<ReturnType<typeof createAreaStyleFactory> | null>(null);
 	useEffect(() => {
-		selectedFeatureRef.current = selectedFeature;
-		mapInstance.current?.getLayers().forEach((layer) => {
-			if (layer instanceof VectorLayer) layer.changed();
-		});
-	}, [selectedFeature]);
+		if (availableAreas) {
+			const areaStyleConfigs = availableAreas.map(area => ({
+				type: area.name.toLowerCase(), // ensure lowercase consistency
+				label: area.name.toUpperCase(),
+				color: area.color,
+				fill: true,
+			}));
+			getAreaStyle.current = createAreaStyleFactory(areaStyleConfigs);
+		}
+	}, [availableAreas]);
 
+	// initialize map & interactions
 	useEffect(() => {
-		if (!mapRef.current || mapInstance.current) return;
+		if (!mapContainerRef.current || mapInstanceRef.current) return;
 
 		const vectorLayer = new VectorLayer({
-			source: vectorSourceRef.current,
-			style: (feature) => {
+			source: featureSourceRef.current,
+			style: feature => {
 				const type = feature.get("type");
-				const isSelected = selectedFeatureRef.current === feature;
+				const isSelected = selectionRef.current === feature;
 
 				if (type === "unit") {
-					const icon = feature.get("unitIcon") ?? "default";
-					const side = feature.get("side") ?? "ally";
-
-					return getUnitStyle(icon, side, isSelected);
+					return getUnitStyle(
+						feature.get("unitIcon") || "default",
+						feature.get("side") || "ally",
+						isSelected,
+					);
 				}
 
-				return getAreaStyle(feature, isSelected);
+				if (type === "objective") {
+					const state = feature.get("state");
+					let fill = "#374151", stroke = "#6B7280", textCol = "#D1D5DB";
+					if (state === "capturing") [stroke, textCol] = ["#FBBF24", "#FCD34D"];
+					else if (state === "captured") [fill, stroke, textCol] = ["#047857", "#10B981", "#ffffff"];
+
+					return new Style({
+						image: new CircleStyle({
+							radius: isSelected ? 18 : 16,
+							fill: new Fill({ color: fill }),
+							stroke: new Stroke({ color: stroke, width: 2 }),
+						}),
+						text: new Text({
+							text: feature.get("letter"),
+							font: "14px sans-serif",
+							fill: new Fill({ color: textCol }),
+						}),
+					});
+				}
+
+				return getAreaStyle.current?.(feature, isSelected);
 			},
 		});
 
 		const map = new Map({
-			target: mapRef.current,
-			layers: [new TileLayer({ source: new OSM({ attributions: [] }) }), vectorLayer],
+			target: mapContainerRef.current,
+			layers: [
+				new TileLayer({ source: new OSM({ attributions: [] }) }),
+				vectorLayer,
+			],
 			view: new View({ center: [0, 0], zoom: 2 }),
 			controls: [],
 		});
 
+		// select interaction
 		const select = new Select({ condition: click, style: null });
+		select.on("select", e => setActiveFeature(e.selected[0] || null));
 		map.addInteraction(select);
-		select.on("select", (e) => {
-			setSelectedFeature(e.selected[0] || null);
-		});
 
-		mapInstance.current = map;
+		mapInstanceRef.current = map;
 	}, []);
 
+	// refresh layer on selection change
 	useEffect(() => {
-		if (!mapInstance.current) return;
-		mapInstance.current.getInteractions().forEach((interaction) => {
-			if (interaction instanceof Draw) mapInstance.current!.removeInteraction(interaction);
-		});
-		if (!drawType || !playableAreaDrawn) return;
-
-		const source = vectorSourceRef.current;
-
-		if (drawType === "unit") {
-			const draw = new Draw({ source, type: "Point" });
-			draw.on("drawend", (e) => {
-				e.feature.set("type", "unit");
-				e.feature.set("unitIcon", selectedUnitType ?? "default");
-				e.feature.set("side", selectedUnitSide);
-			});
-			mapInstance.current.addInteraction(draw);
-
-			return;
-		}
-
-		const draw = new Draw({ source, type: "Polygon" });
-		draw.on("drawend", (e) => {
-			e.feature.set("type", drawType);
-		});
-		mapInstance.current.addInteraction(draw);
-	}, [drawType, playableAreaDrawn, selectedUnitType, selectedUnitSide]);
-
-	useEffect(() => {
-		mapInstance.current?.getLayers().forEach((layer) => {
+		selectionRef.current = activeFeature;
+		mapInstanceRef.current?.getLayers().forEach(layer => {
 			if (layer instanceof VectorLayer) layer.changed();
 		});
-	}, [selectedFeature]);
+	}, [activeFeature]);
 
-	const deleteSelectedFeature = () => {
-		if (selectedFeature) {
-			const isPlayableArea = selectedFeature.get("type") === "playable";
-			vectorSourceRef.current.removeFeature(selectedFeature);
-			setSelectedFeature(null);
-			if (isPlayableArea) {
-				setPlayableAreaDrawn(false);
-				setDrawType(null);
-			}
-		}
-	};
+	// draw interaction
+	useEffect(() => {
+		const map = mapInstanceRef.current;
+		if (!map) return;
 
-	const drawPlayableArea = () => {
-		if (!mapInstance.current) return;
-		setError(null);
-		const draw = new Draw({ source: vectorSourceRef.current, type: "Circle", geometryFunction: createBox() });
-		mapInstance.current.addInteraction(draw);
-
-		draw.on("drawend", (e) => {
-			const geometry = e.feature.getGeometry();
-			if (!geometry) return;
-
-			const extent = geometry.getExtent();
-			const width = extent[2] - extent[0];
-			const height = extent[3] - extent[1];
-
-			if (width < 5000 || height < 5000) {
-				vectorSourceRef.current.removeFeature(e.feature);
-				setError("Playable area must be at least 5×5 kilometers.");
-				mapInstance.current!.removeInteraction(draw);
-
-				return;
-			}
-
-			e.feature.set("type", "playable");
-			e.feature.set("widthKm", (width / 1000).toFixed(1));
-			e.feature.set("heightKm", (height / 1000).toFixed(1));
-			setPlayableAreaDrawn(true);
-			mapInstance.current!.removeInteraction(draw);
+		// remove old Draw
+		map.getInteractions().forEach(i => {
+			if (i instanceof Draw) map.removeInteraction(i);
 		});
+
+		if (!activeDrawMode) return;
+
+		const opts: any = { source: featureSourceRef.current };
+
+		if (activeDrawMode === "unit") {
+			opts.type = "Point";
+			const draw = new Draw(opts);
+			draw.on("drawend", e => {
+				e.feature.set("type", "unit");
+				e.feature.set("unitIcon", chosenUnitType || "default");
+				e.feature.set("side", chosenUnitSide);
+			});
+			map.addInteraction(draw);
+		} else if (activeDrawMode === "objective") {
+			opts.type = "Point";
+			const draw = new Draw(opts);
+			draw.on("drawend", e => {
+				const feat = e.feature;
+				feat.set("type", "objective");
+				// calculate letter
+				const existing = featureSourceRef.current.getFeatures().filter(f => f.get("type") === "objective");
+				const letter = String.fromCharCode(65 + existing.length);
+				feat.set("letter", letter);
+				feat.set("state", "neutral");
+
+				// store in React state
+				const coord = (feat.getGeometry() as Point).getCoordinates();
+				const lonlat = toLonLat(coord) as [number, number];
+				setObjectives(objs => [...objs, { letter, state: "neutral", position: lonlat }]);
+			});
+			map.addInteraction(draw);
+		} else {
+			opts.type = "Polygon";
+			const draw = new Draw(opts);
+			draw.on("drawend", e => {
+				e.feature.set("type", activeDrawMode.toLowerCase()); // ensure matching
+			});
+			map.addInteraction(draw);
+		}
+
+	}, [activeDrawMode, chosenUnitType, chosenUnitSide]);
+
+	const removeActive = () => {
+		if (!activeFeature) return;
+		if (activeFeature.get("type") === "objective") {
+			const letter = activeFeature.get("letter");
+			setObjectives(objs => objs.filter(o => o.letter !== letter));
+		}
+
+		featureSourceRef.current.removeFeature(activeFeature);
+		setActiveFeature(null);
 	};
 
-	const selectedUnitData = selectedFeature?.get("type") === "unit" && unitTypes
-		? unitTypes.find((u) => u.icon === selectedFeature.get("unitIcon"))
-		: null;
+	const selectedUnit =
+    activeFeature?.get("type") === "unit" && availableUnitTypes
+    	? availableUnitTypes.find(u => u.icon === activeFeature.get("unitIcon"))
+    	: null;
+
+	const selectedArea =
+	activeFeature?.get("type") &&
+	availableAreas?.find(
+		a => a.name.toLowerCase() === activeFeature.get("type"),
+	);
 
 	return (
 		<div className="flex flex-1 w-full h-full text-white">
 			<div className="w-2/3 h-full border-r border-slate-700 relative">
-				<div ref={mapRef} className="w-full h-full" />
-				{selectedFeature && selectedUnitData && (
+				{/* Objective banner */}
+				<ObjectiveBar objectives={objectives} map={mapInstanceRef.current} />
+				<div ref={mapContainerRef} className="w-full h-full" />
+
+				{activeFeature && selectedUnit && (
 					<UnitInfoPanel
 						unit={{
-							id: selectedFeature.ol_uid.toString(),
-							name: selectedUnitData.name,
-							health: selectedUnitData.health,
-							accuracy: selectedUnitData.accuracy,
-							sightRange: selectedUnitData.sightRange,
-							movementSpeed: selectedUnitData.movementSpeed,
-							position: selectedFeature.getGeometry()?.getCoordinates() || [0, 0],
-							type: selectedUnitData.icon,
-							side: selectedFeature.get("side") || "ally",
+							id: activeFeature.ol_uid.toString(),
+							name: selectedUnit.name,
+							health: selectedUnit.health,
+							accuracy: selectedUnit.accuracy,
+							sightRange: selectedUnit.sightRange,
+							movementSpeed: selectedUnit.movementSpeed,
+							position: activeFeature.getGeometry()?.getCoordinates() || [0, 0],
+							type: selectedUnit.icon,
+							side: activeFeature.get("side") || "ally",
 						}}
-						onClose={() => setSelectedFeature(null)}
+						onClose={() => setActiveFeature(null)}
 					/>
 				)}
+
+				{activeFeature && selectedArea && (
+					<AreaInfoPanel
+						area={selectedArea}
+						onClose={() => setActiveFeature(null)}
+					/>
+				)}
+
 			</div>
 
 			<EditorSidebar
-				scenarioName={scenarioName}
-				setScenarioName={setScenarioName}
-				playableAreaDrawn={playableAreaDrawn}
-				drawType={drawType}
-				setDrawType={setDrawType}
-				selectedUnitType={selectedUnitType}
-				setSelectedUnitType={setSelectedUnitType}
-				selectedUnitSide={selectedUnitSide}
-				setSelectedUnitSide={setSelectedUnitSide}
-				error={error}
-				setError={setError}
-				drawPlayableArea={drawPlayableArea}
-				deleteSelectedFeature={deleteSelectedFeature}
-				unitTypes={unitTypes ?? []}
+				scenarioName={scenarioTitle}
+				setScenarioName={setScenarioTitle}
+				drawType={activeDrawMode}
+				setDrawType={setActiveDrawMode}
+				selectedUnitType={chosenUnitType}
+				setSelectedUnitType={setChosenUnitType}
+				selectedUnitSide={chosenUnitSide}
+				setSelectedUnitSide={setChosenUnitSide}
+				deleteSelectedFeature={removeActive}
+				unitTypes={availableUnitTypes ?? []}
+				areaTypes={(availableAreas ?? []).map(a => ({
+					name: a.name.toLowerCase(),
+					color: a.color,
+				}))}
 			/>
+
 		</div>
 	);
 }

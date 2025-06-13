@@ -1,9 +1,7 @@
 {
-"scripts": {
-  "generate:proto": "npx protoc --ts_proto_out=../frontend/src/actions/proto --ts_proto_opt=esModuleInterop=true,forceLong=string -I . unit_Types.proto"
-},
-
-
+  "scripts": {
+    "generate:proto": "npx protoc --ts_proto_out=../frontend/src/actions/proto --ts_proto_opt=esModuleInterop=true,forceLong=string -I ./proto ./proto/*.proto"
+  },
   "dependencies": {
     "google-protobuf": "^3.21.4"
   },
