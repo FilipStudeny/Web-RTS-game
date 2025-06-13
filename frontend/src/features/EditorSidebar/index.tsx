@@ -5,6 +5,7 @@ import {
 	XCircle,
 	MousePointerSquareDashed,
 	Target,
+	CheckCircle,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -33,6 +34,9 @@ interface EditorSidebarProps {
 	deleteSelectedFeature: ()=> void,
 	unitTypes: UnitType[],
 	areaTypes: AreaType[],
+	canCreateScenario: boolean,
+	onCreateScenario: ()=> void,
+
 }
 
 const getIconForArea = (name: string) => {
@@ -58,6 +62,8 @@ export default function EditorSidebar({
 	deleteSelectedFeature,
 	unitTypes,
 	areaTypes,
+	canCreateScenario,
+	onCreateScenario,
 }: EditorSidebarProps) {
 	const [query, setQuery] = useState("");
 	const [isOpen, setIsOpen] = useState(false);
@@ -102,7 +108,6 @@ export default function EditorSidebar({
 				/>
 			</div>
 
-			
 			<div className="flex flex-wrap gap-2">
 				{areaTypes.map((area) => (
 					<ActionButton
@@ -118,19 +123,13 @@ export default function EditorSidebar({
 			</div>
 
 			<ActionButton
-				onClick={() => setDrawType("unit")}
+				onClick={() => setDrawType(drawType === "unit" ? null : "unit")}
 				icon={<ShieldPlus className="w-5 h-5" />}
-				className="bg-blue-700 hover:bg-blue-800"
+				className={`${
+					drawType === "unit" ? "bg-blue-800" : "bg-blue-700 hover:bg-blue-800"
+				}`}
 			>
 				Place Unit
-			</ActionButton>
-
-			<ActionButton
-				onClick={() => setDrawType("objective")}
-				icon={<Target className="w-5 h-5" />}
-				className="bg-purple-600 hover:bg-purple-700"
-			>
-				Add Objective
 			</ActionButton>
 
 			{drawType === "unit" && (
@@ -161,12 +160,18 @@ export default function EditorSidebar({
 									filteredUnits.map((u) => (
 										<li
 											key={u.type}
-											className="cursor-pointer px-4 py-2 hover:bg-slate-700 hover:text-white text-slate-300"
+											className="cursor-pointer px-4 py-2 hover:bg-slate-700 hover:text-white text-slate-300 flex items-center gap-2"
 											onMouseDown={() => handleSelect(u.icon)}
 										>
-											{u.name}
+											<img
+												src={`/images/units/${u.icon.toLowerCase()}.png`}
+												alt={u.name}
+												className="w-6 h-6 object-contain"
+											/>
+											<span>{u.name}</span>
 										</li>
 									))
+
 								) : (
 									<li className="px-4 py-2 text-slate-500">No units found.</li>
 								)}
@@ -191,6 +196,14 @@ export default function EditorSidebar({
 			)}
 
 			<ActionButton
+				onClick={() => setDrawType("objective")}
+				icon={<Target className="w-5 h-5" />}
+				className="bg-purple-600 hover:bg-purple-700"
+			>
+				Add Objective
+			</ActionButton>
+
+			<ActionButton
 				onClick={() => setDrawType(null)}
 				icon={<MousePointerSquareDashed className="w-5 h-5" />}
 				className="bg-slate-600 hover:bg-slate-700"
@@ -205,6 +218,20 @@ export default function EditorSidebar({
 			>
 				Delete Selected
 			</ActionButton>
+
+			<ActionButton
+				onClick={onCreateScenario}
+				disabled={!canCreateScenario}
+				icon={<CheckCircle className="w-5 h-5" />}
+				className={`mt-auto ${
+					canCreateScenario
+						? "bg-green-600 hover:bg-green-700"
+						: "bg-green-900 opacity-50 cursor-not-allowed"
+				}`}
+			>
+				Create Scenario
+			</ActionButton>
+
 		</div>
 	);
 }

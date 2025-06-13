@@ -49,6 +49,7 @@ export default function ScenarioEditor() {
 
 	const { data: availableUnitTypes } = useGetEditorUnitTypes();
 	const { data: availableAreas } = useGetEditorAreaTypes();
+	const [canCreateScenario, setCanCreateScenario] = useState(false);
 
 	// preload unit icons
 	useEffect(() => {
@@ -192,6 +193,23 @@ export default function ScenarioEditor() {
 
 	}, [activeDrawMode, chosenUnitType, chosenUnitSide]);
 
+	useEffect(() => {
+		const source = featureSourceRef.current;
+
+		const onAdd = () => updateScenarioEligibility();
+		const onRemove = () => updateScenarioEligibility();
+
+		source.on("addfeature", onAdd);
+		source.on("removefeature", onRemove);
+
+		updateScenarioEligibility();
+
+		return () => {
+			source.un("addfeature", onAdd);
+			source.un("removefeature", onRemove);
+		};
+	}, []);
+
 	const removeActive = () => {
 		if (!activeFeature) return;
 		if (activeFeature.get("type") === "objective") {
@@ -213,6 +231,13 @@ export default function ScenarioEditor() {
 	availableAreas?.find(
 		a => a.name.toLowerCase() === activeFeature.get("type"),
 	);
+
+	const updateScenarioEligibility = () => {
+		const features = featureSourceRef.current.getFeatures();
+		const allyCount = features.filter(f => f.get("type") === "unit" && f.get("side") === "ally").length;
+		const enemyCount = features.filter(f => f.get("type") === "unit" && f.get("side") === "enemy").length;
+		setCanCreateScenario(allyCount >= 1 && enemyCount >= 1);
+	};
 
 	return (
 		<div className="flex flex-1 w-full h-full text-white">
@@ -262,6 +287,14 @@ export default function ScenarioEditor() {
 					name: a.name.toLowerCase(),
 					color: a.color,
 				}))}
+				canCreateScenario={canCreateScenario}
+				onCreateScenario={() => {
+					console.log("Scenario created:", {
+						name: scenarioTitle,
+						units: featureSourceRef.current.getFeatures().filter(f => f.get("type") === "unit"),
+						objectives,
+					});
+				}}
 			/>
 
 		</div>
