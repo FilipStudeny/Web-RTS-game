@@ -9,12 +9,12 @@ use axum::{
     Router,
 };
 use models::{
-    RawUnitType,
     proto::{
         UnitType as PbUnitType,
         UnitTypeList as PbUnitTypeList,
         Area as PbArea,
         AreaList as PbAreaList,
+        UnitTypeKey,
     },
 };
 use prost::Message as ProstMessage;
@@ -115,24 +115,29 @@ pub fn load_configs_from_dir<T: DeserializeOwned>(dir: &Path) -> Result<Vec<T>, 
 pub async fn list_unit_types_protobuf() -> impl IntoResponse {
     let config_file = Path::new("../shared/configs/units-config.json");
 
-    let raw_units: Vec<RawUnitType> = match load_configs_from_file(config_file) {
+    let mut raw_units: Vec<serde_json::Value> = match load_configs_from_file(config_file) {
         Ok(units) => units,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
     };
 
     let proto_units: Vec<PbUnitType> = raw_units
-        .into_iter()
-        .map(|u| PbUnitType {
-            r#type: u.type_,
-            name: u.name,
-            description: u.description,
-            icon: u.icon,
-            health: u.health,
-            accuracy: u.accuracy,
-            sight_range: u.sight_range,
-            movement_speed: u.movement_speed,
+        .drain(..)
+        .filter_map(|mut val| {
+            let type_str = val.get("type")?.as_str()?.to_ascii_uppercase();
+            let key = UnitTypeKey::from_str_name(&type_str)? as i32;
+            Some(PbUnitType {
+                r#type: key,
+                name: val.get("name")?.as_str()?.to_string(),
+                description: val.get("description")?.as_str()?.to_string(),
+                icon: val.get("icon")?.as_str()?.to_string(),
+                health: val.get("health")?.as_u64()? as u32,
+                accuracy: val.get("accuracy")?.as_f64()? as f32,
+                sight_range: val.get("sight_range")?.as_f64()? as f32,         // ✅ fixed
+                movement_speed: val.get("movement_speed")?.as_f64()? as f32,   // ✅ fixed
+            })
         })
         .collect();
+
 
     let unit_list = PbUnitTypeList {
         unit_types: proto_units,

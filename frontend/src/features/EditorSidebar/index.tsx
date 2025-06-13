@@ -9,13 +9,11 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import type { UnitType, UnitTypeKey } from "@/actions/proto/unit_Types";
+
 import ActionButton from "@/components/ActionButton";
 
-interface UnitType {
-	type: string,
-	name: string,
-	icon: string,
-}
+type UnitSide = "ally" | "enemy";
 
 interface AreaType {
 	name: string,
@@ -27,16 +25,15 @@ interface EditorSidebarProps {
 	setScenarioName: (value: string)=> void,
 	drawType: string | null,
 	setDrawType: (value: string | null)=> void,
-	selectedUnitType: string | null,
-	setSelectedUnitType: (value: string)=> void,
-	selectedUnitSide: "ally" | "enemy",
-	setSelectedUnitSide: (value: "ally" | "enemy")=> void,
+	selectedUnitType: UnitTypeKey | null,
+	setSelectedUnitType: (value: UnitTypeKey)=> void,
+	selectedUnitSide: UnitSide,
+	setSelectedUnitSide: (value: UnitSide)=> void,
 	deleteSelectedFeature: ()=> void,
 	unitTypes: UnitType[],
 	areaTypes: AreaType[],
 	canCreateScenario: boolean,
 	onCreateScenario: ()=> void,
-
 }
 
 const getIconForArea = (name: string) => {
@@ -75,14 +72,14 @@ export default function EditorSidebar({
 				u.name.toLowerCase().includes(query.toLowerCase()),
 			);
 
-	const handleSelect = (icon: string) => {
-		setSelectedUnitType(icon);
+	const handleSelect = (type: UnitTypeKey) => {
+		setSelectedUnitType(type);
 		setQuery("");
 		setIsOpen(false);
 	};
 
-	const selectedUnitName =
-		unitTypes.find((u) => u.icon === selectedUnitType)?.name || "";
+	const selectedUnit = unitTypes.find((u) => u.type === selectedUnitType);
+	const selectedUnitName = selectedUnit?.name || "";
 
 	return (
 		<div className="w-1/3 h-full flex flex-col gap-4 p-4 bg-slate-900 shadow-inner overflow-hidden">
@@ -90,12 +87,8 @@ export default function EditorSidebar({
 				Scenario Editor
 			</h2>
 
-			{/* Scenario Name Input */}
 			<div className="flex flex-col gap-1">
-				<label
-					htmlFor="scenario-name"
-					className="text-sm font-semibold text-slate-300"
-				>
+				<label htmlFor="scenario-name" className="text-sm font-semibold text-slate-300">
 					Scenario Name
 				</label>
 				<input
@@ -161,7 +154,7 @@ export default function EditorSidebar({
 										<li
 											key={u.type}
 											className="cursor-pointer px-4 py-2 hover:bg-slate-700 hover:text-white text-slate-300 flex items-center gap-2"
-											onMouseDown={() => handleSelect(u.icon)}
+											onMouseDown={() => handleSelect(u.type)}
 										>
 											<img
 												src={`/images/units/${u.icon.toLowerCase()}.png`}
@@ -171,7 +164,6 @@ export default function EditorSidebar({
 											<span>{u.name}</span>
 										</li>
 									))
-
 								) : (
 									<li className="px-4 py-2 text-slate-500">No units found.</li>
 								)}
@@ -184,7 +176,7 @@ export default function EditorSidebar({
 						<select
 							value={selectedUnitSide}
 							onChange={(e) =>
-								setSelectedUnitSide(e.target.value as "ally" | "enemy")
+								setSelectedUnitSide(e.target.value as UnitSide)
 							}
 							className="bg-slate-800 text-white rounded px-3 py-2 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500"
 						>
@@ -231,7 +223,6 @@ export default function EditorSidebar({
 			>
 				Create Scenario
 			</ActionButton>
-
 		</div>
 	);
 }

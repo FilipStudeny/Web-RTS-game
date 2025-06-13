@@ -5,20 +5,7 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/models.rs"));
     include!(concat!(env!("OUT_DIR"), "/area_models.rs"));
 }
-#[derive(serde::Deserialize)]
-pub struct RawUnitType {
-    #[serde(rename = "type")]
-    pub type_: String,
-    pub name: String,
-    pub description: String,
-    pub icon: String,
-    pub health: u32,
-    pub accuracy: f32,
-    #[serde(rename = "sightRange")]
-    pub sight_range: f32,
-    #[serde(rename = "movementSpeed")]
-    pub movement_speed: f32,
-}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Unit {

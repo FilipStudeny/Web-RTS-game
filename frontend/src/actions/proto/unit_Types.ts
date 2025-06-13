@@ -9,8 +9,125 @@ import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 
 export const protobufPackage = "models";
 
+export enum UnitTypeKey {
+  UNIT_TYPE_UNSPECIFIED = 0,
+  INFANTRY = 1,
+  LIGHT_INFANTRY = 2,
+  MECHANIZED_INFANTRY = 3,
+  MOTORIZED_INFANTRY = 4,
+  SPECIAL_OPERATION_FORCES = 5,
+  ENGINEERS = 6,
+  ARTILLERY = 7,
+  MORTARS = 8,
+  ANTI_TANK = 9,
+  HEADQUATERS_UNIT = 10,
+  LIGHT_ARMOUR = 11,
+  WHEELED_ARMOUR = 12,
+  MEDIUM_ARMOUR = 13,
+  HEAVY_ARMOUR = 14,
+  ARMOUR = 15,
+  UNRECOGNIZED = -1,
+}
+
+export function unitTypeKeyFromJSON(object: any): UnitTypeKey {
+  switch (object) {
+    case 0:
+    case "UNIT_TYPE_UNSPECIFIED":
+      return UnitTypeKey.UNIT_TYPE_UNSPECIFIED;
+    case 1:
+    case "INFANTRY":
+      return UnitTypeKey.INFANTRY;
+    case 2:
+    case "LIGHT_INFANTRY":
+      return UnitTypeKey.LIGHT_INFANTRY;
+    case 3:
+    case "MECHANIZED_INFANTRY":
+      return UnitTypeKey.MECHANIZED_INFANTRY;
+    case 4:
+    case "MOTORIZED_INFANTRY":
+      return UnitTypeKey.MOTORIZED_INFANTRY;
+    case 5:
+    case "SPECIAL_OPERATION_FORCES":
+      return UnitTypeKey.SPECIAL_OPERATION_FORCES;
+    case 6:
+    case "ENGINEERS":
+      return UnitTypeKey.ENGINEERS;
+    case 7:
+    case "ARTILLERY":
+      return UnitTypeKey.ARTILLERY;
+    case 8:
+    case "MORTARS":
+      return UnitTypeKey.MORTARS;
+    case 9:
+    case "ANTI_TANK":
+      return UnitTypeKey.ANTI_TANK;
+    case 10:
+    case "HEADQUATERS_UNIT":
+      return UnitTypeKey.HEADQUATERS_UNIT;
+    case 11:
+    case "LIGHT_ARMOUR":
+      return UnitTypeKey.LIGHT_ARMOUR;
+    case 12:
+    case "WHEELED_ARMOUR":
+      return UnitTypeKey.WHEELED_ARMOUR;
+    case 13:
+    case "MEDIUM_ARMOUR":
+      return UnitTypeKey.MEDIUM_ARMOUR;
+    case 14:
+    case "HEAVY_ARMOUR":
+      return UnitTypeKey.HEAVY_ARMOUR;
+    case 15:
+    case "ARMOUR":
+      return UnitTypeKey.ARMOUR;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return UnitTypeKey.UNRECOGNIZED;
+  }
+}
+
+export function unitTypeKeyToJSON(object: UnitTypeKey): string {
+  switch (object) {
+    case UnitTypeKey.UNIT_TYPE_UNSPECIFIED:
+      return "UNIT_TYPE_UNSPECIFIED";
+    case UnitTypeKey.INFANTRY:
+      return "INFANTRY";
+    case UnitTypeKey.LIGHT_INFANTRY:
+      return "LIGHT_INFANTRY";
+    case UnitTypeKey.MECHANIZED_INFANTRY:
+      return "MECHANIZED_INFANTRY";
+    case UnitTypeKey.MOTORIZED_INFANTRY:
+      return "MOTORIZED_INFANTRY";
+    case UnitTypeKey.SPECIAL_OPERATION_FORCES:
+      return "SPECIAL_OPERATION_FORCES";
+    case UnitTypeKey.ENGINEERS:
+      return "ENGINEERS";
+    case UnitTypeKey.ARTILLERY:
+      return "ARTILLERY";
+    case UnitTypeKey.MORTARS:
+      return "MORTARS";
+    case UnitTypeKey.ANTI_TANK:
+      return "ANTI_TANK";
+    case UnitTypeKey.HEADQUATERS_UNIT:
+      return "HEADQUATERS_UNIT";
+    case UnitTypeKey.LIGHT_ARMOUR:
+      return "LIGHT_ARMOUR";
+    case UnitTypeKey.WHEELED_ARMOUR:
+      return "WHEELED_ARMOUR";
+    case UnitTypeKey.MEDIUM_ARMOUR:
+      return "MEDIUM_ARMOUR";
+    case UnitTypeKey.HEAVY_ARMOUR:
+      return "HEAVY_ARMOUR";
+    case UnitTypeKey.ARMOUR:
+      return "ARMOUR";
+    case UnitTypeKey.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface UnitType {
-  type: string;
+  type: UnitTypeKey;
   name: string;
   description: string;
   icon: string;
@@ -25,13 +142,13 @@ export interface UnitTypeList {
 }
 
 function createBaseUnitType(): UnitType {
-  return { type: "", name: "", description: "", icon: "", health: 0, accuracy: 0, sightRange: 0, movementSpeed: 0 };
+  return { type: 0, name: "", description: "", icon: "", health: 0, accuracy: 0, sightRange: 0, movementSpeed: 0 };
 }
 
 export const UnitType: MessageFns<UnitType> = {
   encode(message: UnitType, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.type !== "") {
-      writer.uint32(10).string(message.type);
+    if (message.type !== 0) {
+      writer.uint32(8).int32(message.type);
     }
     if (message.name !== "") {
       writer.uint32(18).string(message.name);
@@ -65,11 +182,11 @@ export const UnitType: MessageFns<UnitType> = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1: {
-          if (tag !== 10) {
+          if (tag !== 8) {
             break;
           }
 
-          message.type = reader.string();
+          message.type = reader.int32() as any;
           continue;
         }
         case 2: {
@@ -139,7 +256,7 @@ export const UnitType: MessageFns<UnitType> = {
 
   fromJSON(object: any): UnitType {
     return {
-      type: isSet(object.type) ? globalThis.String(object.type) : "",
+      type: isSet(object.type) ? unitTypeKeyFromJSON(object.type) : 0,
       name: isSet(object.name) ? globalThis.String(object.name) : "",
       description: isSet(object.description) ? globalThis.String(object.description) : "",
       icon: isSet(object.icon) ? globalThis.String(object.icon) : "",
@@ -152,8 +269,8 @@ export const UnitType: MessageFns<UnitType> = {
 
   toJSON(message: UnitType): unknown {
     const obj: any = {};
-    if (message.type !== "") {
-      obj.type = message.type;
+    if (message.type !== 0) {
+      obj.type = unitTypeKeyToJSON(message.type);
     }
     if (message.name !== "") {
       obj.name = message.name;
@@ -184,7 +301,7 @@ export const UnitType: MessageFns<UnitType> = {
   },
   fromPartial<I extends Exact<DeepPartial<UnitType>, I>>(object: I): UnitType {
     const message = createBaseUnitType();
-    message.type = object.type ?? "";
+    message.type = object.type ?? 0;
     message.name = object.name ?? "";
     message.description = object.description ?? "";
     message.icon = object.icon ?? "";

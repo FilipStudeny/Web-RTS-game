@@ -2,8 +2,27 @@ syntax = "proto3";
 
 package models;
 
+enum UnitTypeKey {
+  UNIT_TYPE_UNSPECIFIED = 0;
+  INFANTRY = 1;
+  LIGHT_INFANTRY = 2;
+  MECHANIZED_INFANTRY = 3;
+  MOTORIZED_INFANTRY = 4;
+  SPECIAL_OPERATION_FORCES = 5;
+  ENGINEERS = 6;
+  ARTILLERY = 7;
+  MORTARS = 8;
+  ANTI_TANK = 9;
+  HEADQUATERS_UNIT = 10;
+  LIGHT_ARMOUR = 11;
+  WHEELED_ARMOUR = 12;
+  MEDIUM_ARMOUR = 13;
+  HEAVY_ARMOUR = 14;
+  ARMOUR = 15;
+}
+
 message UnitType {
-  string type = 1;
+  UnitTypeKey type = 1;
   string name = 2;
   string description = 3;
   string icon = 4;

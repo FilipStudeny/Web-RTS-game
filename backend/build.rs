@@ -1,6 +1,5 @@
-use prost_build::compile_protos;
-use std::fs;
-use std::path::PathBuf;
+use prost_build::Config;
+use std::{fs, path::PathBuf};
 
 fn main() {
     let proto_dir = "../shared/proto";
@@ -18,6 +17,16 @@ fn main() {
         })
         .collect();
 
-    compile_protos(&protos, &[proto_dir])
+    let mut config = Config::new();
+
+    // Add #[derive(Deserialize, Serialize)] to all messages/enums
+    config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
+
+    // enable serde for enums
+    config
+        .type_attribute(".", "#[serde(rename_all = \"SCREAMING_SNAKE_CASE\")]");
+
+    // Compile with serde support
+    config.compile_protos(&protos, &[proto_dir])
         .expect("Failed to compile proto files");
 }

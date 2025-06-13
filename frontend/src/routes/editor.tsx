@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useGetEditorAreaTypes } from "@/actions/getEditorAreaTypes";
 import { useGetEditorUnitTypes } from "@/actions/getEditorUnitTypes";
+import { UnitTypeKey } from "@/actions/proto/unit_Types";
 import { AreaInfoPanel } from "@/features/AreaInfoPanel";
 import EditorSidebar from "@/features/EditorSidebar";
 import { ObjectiveBar } from "@/features/ObjectiveBar";
@@ -43,7 +44,7 @@ export default function ScenarioEditor() {
 	const [activeDrawMode, setActiveDrawMode] = useState<DrawMode>(null);
 	const [activeFeature, setActiveFeature] = useState<any>(null);
 	const [scenarioTitle, setScenarioTitle] = useState("");
-	const [chosenUnitType, setChosenUnitType] = useState<string | null>(null);
+	const [chosenUnitType, setChosenUnitType] = useState<UnitTypeKey | null>(null);
 	const [chosenUnitSide, setChosenUnitSide] = useState<"ally" | "enemy">("ally");
 	const [objectives, setObjectives] = useState<Objective[]>([]);
 
@@ -64,7 +65,7 @@ export default function ScenarioEditor() {
 	useEffect(() => {
 		if (availableAreas) {
 			const areaStyleConfigs = availableAreas.map(area => ({
-				type: area.name.toLowerCase(), // ensure lowercase consistency
+				type: area.name.toLowerCase(),
 				label: area.name.toUpperCase(),
 				color: area.color,
 				fill: true,
@@ -160,9 +161,13 @@ export default function ScenarioEditor() {
 			const draw = new Draw(opts);
 			draw.on("drawend", e => {
 				e.feature.set("type", "unit");
-				e.feature.set("unitIcon", chosenUnitType || "default");
+				e.feature.set("unitKey", chosenUnitType ?? UnitTypeKey.UNIT_TYPE_UNSPECIFIED);
 				e.feature.set("side", chosenUnitSide);
+
+				const selectedUnit = availableUnitTypes?.find(u => u.type === chosenUnitType);
+				e.feature.set("unitIcon", selectedUnit?.icon ?? "default");
 			});
+
 			map.addInteraction(draw);
 		} else if (activeDrawMode === "objective") {
 			opts.type = "Point";
@@ -222,9 +227,9 @@ export default function ScenarioEditor() {
 	};
 
 	const selectedUnit =
-    activeFeature?.get("type") === "unit" && availableUnitTypes
-    	? availableUnitTypes.find(u => u.icon === activeFeature.get("unitIcon"))
-    	: null;
+	activeFeature?.get("type") === "unit" && availableUnitTypes
+		? availableUnitTypes.find((u) => u.type === activeFeature.get("unitKey"))
+		: null;
 
 	const selectedArea =
 	activeFeature?.get("type") &&
@@ -242,23 +247,12 @@ export default function ScenarioEditor() {
 	return (
 		<div className="flex flex-1 w-full h-full text-white">
 			<div className="w-2/3 h-full border-r border-slate-700 relative">
-				{/* Objective banner */}
 				<ObjectiveBar objectives={objectives} map={mapInstanceRef.current} />
 				<div ref={mapContainerRef} className="w-full h-full" />
 
 				{activeFeature && selectedUnit && (
 					<UnitInfoPanel
-						unit={{
-							id: activeFeature.ol_uid.toString(),
-							name: selectedUnit.name,
-							health: selectedUnit.health,
-							accuracy: selectedUnit.accuracy,
-							sightRange: selectedUnit.sightRange,
-							movementSpeed: selectedUnit.movementSpeed,
-							position: activeFeature.getGeometry()?.getCoordinates() || [0, 0],
-							type: selectedUnit.icon,
-							side: activeFeature.get("side") || "ally",
-						}}
+						unit={selectedUnit}
 						onClose={() => setActiveFeature(null)}
 					/>
 				)}
