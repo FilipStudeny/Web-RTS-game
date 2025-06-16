@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package scenario;
+
+message Position {
+  double lon = 1;
+  double lat = 2;
+}
+
+enum ObjectiveState {
+  NEUTRAL = 0;
+  CAPTURING = 1;
+  CAPTURED = 2;
+}
+
+message Objective {
+  string letter = 1;
+  ObjectiveState state = 2;
+  Position position = 3;
+}
+
+enum UnitSide {
+  ALLY = 0;
+  ENEMY = 1;
+}
+
+message Unit {
+  Position position = 1;
+  string unit_key = 2;
+  UnitSide side = 3;
+  string icon = 4;
+}
+
+message ScenarioArea {
+  string type = 1;
+  repeated Ring coordinates = 2;
+}
+
+message Ring {
+  repeated Position points = 1;
+}
+
+message Scenario {
+  string name = 1;
+  repeated Objective objectives = 2;
+  repeated Unit units = 3;
+  repeated ScenarioArea areas = 4;
+}

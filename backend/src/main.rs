@@ -19,11 +19,14 @@ use models::{
 };
 use prost::Message as ProstMessage;
 use std::{fs, net::SocketAddr, path::Path};
+use axum::body::Bytes;
+use axum::routing::post;
 use tokio::net::TcpListener;
 use tracing_subscriber::fmt::init;
 use uuid::Uuid;
 use tower_http::cors::{Any, CorsLayer};
 use serde::de::DeserializeOwned;
+use crate::models::proto::Scenario;
 
 #[tokio::main]
 async fn main() {
@@ -38,6 +41,7 @@ async fn main() {
         .route("/ws", get(ws_handler))
         .route("/api/unit-types.pb", get(list_unit_types_protobuf))
         .route("/api/area-types.pb", get(list_area_types_protobuf))
+        .route("/api/scenario.pb", post(receive_scenario_protobuf))
         .layer(cors);
 
     let listener = TcpListener::bind("0.0.0.0:9999").await.unwrap();
@@ -132,8 +136,8 @@ pub async fn list_unit_types_protobuf() -> impl IntoResponse {
                 icon: val.get("icon")?.as_str()?.to_string(),
                 health: val.get("health")?.as_u64()? as u32,
                 accuracy: val.get("accuracy")?.as_f64()? as f32,
-                sight_range: val.get("sight_range")?.as_f64()? as f32,         // ✅ fixed
-                movement_speed: val.get("movement_speed")?.as_f64()? as f32,   // ✅ fixed
+                sight_range: val.get("sight_range")?.as_f64()? as f32,         
+                movement_speed: val.get("movement_speed")?.as_f64()? as f32, 
             })
         })
         .collect();
@@ -197,4 +201,25 @@ pub async fn list_area_types_protobuf() -> impl IntoResponse {
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
 
     (headers, buffer).into_response()
+}
+pub async fn receive_scenario_protobuf(body: Bytes) -> impl IntoResponse {
+    match Scenario::decode(body) {
+        Ok(scenario) => {
+            println!("Received scenario:");
+            println!("Name: {}", scenario.name);
+            println!("Units: {:#?}", scenario.units);
+            println!("Objectives: {:#?}", scenario.objectives);
+            println!("Areas: {:#?}", scenario.areas);
+            
+            (StatusCode::OK, "Scenario received").into_response()
+        }
+        Err(e) => {
+            eprintln!("Failed to decode scenario: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid Protobuf data: {}", e),
+            )
+                .into_response()
+        }
+    }
 }

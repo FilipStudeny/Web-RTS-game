@@ -4,6 +4,7 @@ use uuid::Uuid;
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/models.rs"));
     include!(concat!(env!("OUT_DIR"), "/area_models.rs"));
+    include!(concat!(env!("OUT_DIR"), "/scenario.rs"));
 }
 
 

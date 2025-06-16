@@ -1,9 +1,11 @@
 import Map from "ol/Map";
 import { fromLonLat } from "ol/proj";
 
+import type { ObjectiveState } from "@/actions/models/ObjectiveState";
+
 export type Objective = {
 	letter: string,
-	state: "neutral" | "capturing" | "captured",
+	state: ObjectiveState,
 	position: [number, number], // [lon, lat]
 };
 

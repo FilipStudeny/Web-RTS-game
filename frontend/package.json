@@ -25,6 +25,7 @@
     "ol": "^9.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hot-toast": "^2.5.2",
     "socket.io-client": "^4.8.1",
     "tailwindcss": "^4.0.6",
     "zustand": "^5.0.5"

@@ -1,5 +1,6 @@
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { Toaster } from "react-hot-toast";
 
 import Header from "../components/Header";
 
@@ -45,6 +46,7 @@ function AppLayout() {
 	return (
 		<div className="flex flex-col h-screen">
 			<Header />
+			<Toaster position="top-right" />
 			<div className="flex-1">
 				<Outlet />
 			</div>
