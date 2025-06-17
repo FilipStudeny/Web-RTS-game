@@ -1,27 +1,21 @@
-// src/mutations/useSubmitScenario.ts
 import { useMutation } from "@tanstack/react-query";
 
 import { Scenario } from "@/actions/proto/create_scenario";
+import { axiosInstance } from "@/integrations/axios/axiosInstance";
 
 export function useCreateScenario() {
 	return useMutation({
 		mutationFn: async (scenario: Scenario) => {
 			const binary = Scenario.encode(scenario).finish();
 
-			const res = await fetch("http://localhost:9999/api/scenario.pb", {
-				method: "POST",
+			const res = await axiosInstance.post("/scenario.pb", binary, {
 				headers: {
 					"Content-Type": "application/protobuf",
 				},
-				body: binary,
+				responseType: "text",
 			});
 
-			if (!res.ok) {
-				const text = await res.text();
-				throw new Error(`Server error: ${res.status} - ${text}`);
-			}
-
-			return await res.text();
+			return res.data;
 		},
 	});
 }

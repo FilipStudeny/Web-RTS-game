@@ -19,6 +19,7 @@
     "@tanstack/react-router": "^1.114.3",
     "@tanstack/react-router-devtools": "^1.114.3",
     "@tanstack/router-plugin": "^1.114.3",
+    "axios": "^1.10.0",
     "classnames": "^2.5.1",
     "google-protobuf": "^3.21.4",
     "lucide-react": "^0.507.0",

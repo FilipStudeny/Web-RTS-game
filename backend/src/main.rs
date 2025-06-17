@@ -3,29 +3,24 @@ mod models;
 use std::{fs, net::SocketAddr, path::Path as FsPath, sync::Arc};
 
 use axum::{
+    Router,
     body::Bytes,
     extract::{
-        ConnectInfo,
-        Path,
-        State,
+        ConnectInfo, Path, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
     routing::{get, post},
-    Router,
 };
 use models::proto::{
-    Area as PbArea,
-    AreaList as PbAreaList,
-    Scenario,
-    ScenarioList,
-    ScenarioSummary,
-    UnitType as PbUnitType,
-    UnitTypeKey,
-    UnitTypeList as PbUnitTypeList,
+    Area as PbArea, AreaList as PbAreaList, Scenario, ScenarioList, ScenarioSummary,
+    UnitType as PbUnitType, UnitTypeKey, UnitTypeList as PbUnitTypeList,
 };
-use mongodb::{bson, bson::{doc, oid::ObjectId, to_bson, Document}, Client, Database};
+use mongodb::{
+    Client, Database, bson,
+    bson::{Document, doc, oid::ObjectId, to_bson},
+};
 use prost::Message as ProstMessage;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
@@ -57,6 +52,7 @@ async fn main() {
         .route("/api/area-types.pb", get(list_area_types_protobuf))
         .route("/api/scenario.pb", post(receive_scenario_protobuf))
         .route("/api/scenario/{id}/pb", get(get_scenario_by_id_protobuf))
+        .route("/api/scenario-list.pb", get(list_scenario_summaries_protobuf))
         .with_state(db.clone())
         .layer(cors);
 
@@ -65,9 +61,12 @@ async fn main() {
     info!("- WebSocket: ws://localhost:9999/ws");
     info!("- REST API: http://localhost:9999/api/scenario.pb");
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 async fn ws_handler(
@@ -81,12 +80,20 @@ async fn ws_handler(
 async fn handle_socket(mut socket: WebSocket, addr: SocketAddr) {
     let user_id = Uuid::new_v4();
 
-    if socket.send(Message::Text(user_id.to_string().into())).await.is_err() {
+    if socket
+        .send(Message::Text(user_id.to_string().into()))
+        .await
+        .is_err()
+    {
         error!("Failed to send welcome message to {}", addr);
         return;
     }
 
-    info!("Assigned ID: {} to connected user at address: {}", user_id, addr.ip());
+    info!(
+        "Assigned ID: {} to connected user at address: {}",
+        user_id,
+        addr.ip()
+    );
 
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
@@ -101,10 +108,9 @@ async fn handle_socket(mut socket: WebSocket, addr: SocketAddr) {
 }
 
 pub fn load_configs_from_file<T: DeserializeOwned>(path: &FsPath) -> Result<Vec<T>, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read file {:?}: {}", path, e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse JSON in {:?}: {}", path, e))
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read file {:?}: {}", path, e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON in {:?}: {}", path, e))
 }
 
 pub fn load_configs_from_dir<T: DeserializeOwned>(dir: &FsPath) -> Result<Vec<T>, String> {
@@ -155,7 +161,11 @@ pub async fn list_unit_types_protobuf() -> impl IntoResponse {
 
     let mut buffer = Vec::new();
     if unit_list.encode(&mut buffer).is_err() {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Protobuf encoding failed").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Protobuf encoding failed",
+        )
+            .into_response();
     }
 
     let mut headers = HeaderMap::new();
@@ -197,7 +207,11 @@ pub async fn list_area_types_protobuf() -> impl IntoResponse {
 
     let mut buffer = Vec::new();
     if area_list.encode(&mut buffer).is_err() {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Protobuf encoding failed").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Protobuf encoding failed",
+        )
+            .into_response();
     }
 
     let mut headers = HeaderMap::new();
@@ -227,7 +241,8 @@ pub async fn receive_scenario_protobuf(
                             (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 format!("Failed to save scenario: {}", e),
-                            ).into_response()
+                            )
+                                .into_response()
                         }
                     }
                 }
@@ -236,7 +251,8 @@ pub async fn receive_scenario_protobuf(
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Serialization error: {}", e),
-                    ).into_response()
+                    )
+                        .into_response()
                 }
             }
         }
@@ -245,7 +261,8 @@ pub async fn receive_scenario_protobuf(
             (
                 StatusCode::BAD_REQUEST,
                 format!("Invalid Protobuf data: {}", e),
-            ).into_response()
+            )
+                .into_response()
         }
     }
 }
@@ -257,44 +274,107 @@ pub async fn get_scenario_by_id_protobuf(
     let obj_id = match ObjectId::parse_str(&id) {
         Ok(id) => id,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                format!("Invalid ObjectId: {}", id),
-            ).into_response();
+            return (StatusCode::BAD_REQUEST, format!("Invalid ObjectId: {}", id)).into_response();
         }
     };
 
     let collection = db.collection::<Document>("scenarios");
 
     match collection.find_one(doc! { "_id": obj_id }).await {
-        Ok(Some(doc)) => {
-            match bson::from_document::<Scenario>(doc) {
-                Ok(scenario) => {
-                    let mut buffer = Vec::new();
-                    if scenario.encode(&mut buffer).is_err() {
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Protobuf encoding failed".to_string(),
-                        ).into_response();
-                    }
-
-                    let mut headers = HeaderMap::new();
-                    headers.insert("Content-Type", "application/protobuf".parse().unwrap());
-                    (headers, buffer).into_response()
+        Ok(Some(doc)) => match bson::from_document::<Scenario>(doc) {
+            Ok(scenario) => {
+                let mut buffer = Vec::new();
+                if scenario.encode(&mut buffer).is_err() {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Protobuf encoding failed".to_string(),
+                    )
+                        .into_response();
                 }
-                Err(e) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to decode BSON into Scenario: {}", e),
-                ).into_response(),
+
+                let mut headers = HeaderMap::new();
+                headers.insert("Content-Type", "application/protobuf".parse().unwrap());
+                (headers, buffer).into_response()
             }
-        }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to decode BSON into Scenario: {}", e),
+            )
+                .into_response(),
+        },
         Ok(None) => (
             StatusCode::NOT_FOUND,
             format!("Scenario not found with ID {}", id),
-        ).into_response(),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Database error: {}", e),
-        ).into_response(),
+        )
+            .into_response(),
     }
+}
+
+pub async fn list_scenario_summaries_protobuf(
+    State(db): State<Arc<Database>>,
+) -> impl IntoResponse {
+    let collection = db.collection::<Document>("scenarios");
+
+    let cursor = match collection.find(doc! {}).await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to query scenarios: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    let mut summaries = Vec::new();
+
+    use futures::StreamExt;
+    let mut cursor = cursor;
+    while let Some(doc_result) = cursor.next().await {
+        match doc_result {
+            Ok(doc) => {
+                let id = doc
+                    .get_object_id("_id")
+                    .map(|oid| oid.to_hex())
+                    .unwrap_or_default();
+
+                let name = doc
+                    .get_str("NAME")
+                    .or_else(|_| doc.get_str("name"))
+                    .unwrap_or("Unnamed")
+                    .to_string();
+
+                summaries.push(ScenarioSummary { id, name });
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cursor error: {}", e),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let list = ScenarioList {
+        scenarios: summaries,
+    };
+
+    let mut buffer = Vec::new();
+    if list.encode(&mut buffer).is_err() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Protobuf encoding failed".to_string(),
+        )
+            .into_response();
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert("Content-Type", "application/protobuf".parse().unwrap());
+    (headers, buffer).into_response()
 }

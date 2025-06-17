@@ -1,15 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Feature } from "ol";
-import Map from "ol/Map";
-import View from "ol/View";
-import ScaleLine from "ol/control/ScaleLine";
-import { Polygon } from "ol/geom";
-import { Vector as VectorLayer } from "ol/layer";
-import TileLayer from "ol/layer/Tile";
-import OSM from "ol/source/OSM";
-import VectorSource from "ol/source/Vector";
-import { Style, Stroke } from "ol/style";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+
+import CreateSessionForm from "@/features/CreateSession";
+import SelectedSessionPanel from "@/features/SelectedSessionPanel";
 
 export const Route = createFileRoute("/load-scenario")({
 	component: LoadScenarioPage,
@@ -23,7 +16,6 @@ function LoadScenarioPage() {
 	];
 
 	const [creating, setCreating] = useState(false);
-	const [scenario, setScenario] = useState("Desert Assault");
 	const [password, setPassword] = useState("");
 	const [selectedSession, setSelectedSession] = useState<typeof sessions[0] | null>(null);
 
@@ -88,8 +80,6 @@ function LoadScenarioPage() {
 					</div>
 				) : (
 					<CreateSessionForm
-						scenario={scenario}
-						setScenario={setScenario}
 						password={password}
 						setPassword={setPassword}
 					/>
@@ -99,227 +89,3 @@ function LoadScenarioPage() {
 	);
 }
 
-function CreateSessionForm({
-	scenario,
-	setScenario,
-	password,
-	setPassword,
-}: {
-	scenario: string,
-	setScenario: (value: string)=> void,
-	password: string,
-	setPassword: (value: string)=> void,
-}) {
-	const mapRef = useRef<HTMLDivElement | null>(null);
-	const mapInstance = useRef<Map | null>(null);
-	const [passwordEnabled, setPasswordEnabled] = useState(false);
-
-	const scenarioBounds: Record<string, [number, number, number, number]> = {
-		"Desert Assault": [-1300000, 1900000, -1100000, 2100000],
-		"Arctic Conflict": [2000000, 9500000, 4000000, 10500000],
-		"Urban Siege": [1490000, 6890000, 1498000, 6898000],
-	};
-
-	useEffect(() => {
-		if (!mapRef.current || mapInstance.current) return;
-
-		const view = new View({ center: [0, 0], zoom: 2 });
-
-		const scaleLine = new ScaleLine({ units: "metric", minWidth: 64 });
-
-		mapInstance.current = new Map({
-			target: mapRef.current,
-			interactions: [],
-			controls: [scaleLine],
-			layers: [new TileLayer({ source: new OSM() })],
-			view,
-		});
-
-		mapInstance.current.set("sessionView", view);
-	}, []);
-
-	useEffect(() => {
-		const extent = scenarioBounds[scenario];
-		if (!mapInstance.current || !extent) return;
-
-		const view = mapInstance.current.get("sessionView") as View;
-		view.fit(extent, { padding: [20, 20, 20, 20] });
-
-		mapInstance.current
-			.getLayers()
-			.getArray()
-			.filter((layer) => layer.get("name") === "boundary")
-			.forEach((layer) => mapInstance.current!.removeLayer(layer));
-
-		const boundaryFeature = new Feature(
-			new Polygon([
-				[
-					[extent[0], extent[1]],
-					[extent[0], extent[3]],
-					[extent[2], extent[3]],
-					[extent[2], extent[1]],
-					[extent[0], extent[1]],
-				],
-			]),
-		);
-
-		const boundaryLayer = new VectorLayer({
-			source: new VectorSource({ features: [boundaryFeature] }),
-			style: new Style({ stroke: new Stroke({ color: "red", width: 2 }) }),
-		});
-		boundaryLayer.set("name", "boundary");
-
-		mapInstance.current.addLayer(boundaryLayer);
-	}, [scenario]);
-
-	return (
-		<div className="flex flex-col gap-4">
-			<h2 className="text-xl font-bold mb-2">Create Session</h2>
-
-			<label className="text-sm">Select Scenario:</label>
-			<select
-				value={scenario}
-				onChange={(e) => setScenario(e.target.value)}
-				className="bg-gray-700 text-white p-2 rounded"
-			>
-				<option value="Desert Assault">Desert Assault</option>
-				<option value="Arctic Conflict">Arctic Conflict</option>
-				<option value="Urban Siege">Urban Siege</option>
-			</select>
-
-			<label className="text-sm">Preview Map:</label>
-			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
-
-			<div className="flex items-center gap-2 mt-2">
-				<input
-					type="checkbox"
-					id="password-toggle"
-					checked={passwordEnabled}
-					onChange={(e) => setPasswordEnabled(e.target.checked)}
-					className="accent-green-600"
-				/>
-				<label htmlFor="password-toggle" className="text-sm select-none">
-					Enable password protection
-				</label>
-			</div>
-
-			{passwordEnabled && (
-				<>
-					<label className="text-sm">Password:</label>
-					<input
-						type="password"
-						value={password}
-						onChange={(e) => setPassword(e.target.value)}
-						placeholder="Enter a password"
-						className="bg-gray-700 text-white p-2 rounded"
-					/>
-				</>
-			)}
-
-			<button className="mt-4 bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-semibold">
-				Start Session
-			</button>
-		</div>
-	);
-}
-
-function SelectedSessionPanel({
-	session,
-	clearSelection,
-}: {
-	session: { id: string, name: string, scenario: string, players: string[] },
-	clearSelection: ()=> void,
-}) {
-	const mapRef = useRef<HTMLDivElement | null>(null);
-	const mapInstance = useRef<Map | null>(null);
-
-	const scenarioBounds: Record<string, [number, number, number, number]> = {
-		"Desert Assault": [-1300000, 1900000, -1100000, 2100000],
-		"Arctic Conflict": [2000000, 9500000, 4000000, 10500000],
-		"Urban Siege": [1490000, 6890000, 1498000, 6898000],
-	};
-
-	useEffect(() => {
-		if (!mapRef.current) return;
-
-		if (mapInstance.current) {
-			mapInstance.current.setTarget(undefined);
-			mapInstance.current = null;
-		}
-
-		const view = new View({ center: [0, 0], zoom: 2 });
-		const extent = scenarioBounds[session.scenario];
-
-		const scaleLine = new ScaleLine({ units: "metric", minWidth: 64 });
-
-		mapInstance.current = new Map({
-			target: mapRef.current,
-			interactions: [],
-			controls: [scaleLine],
-			layers: [new TileLayer({ source: new OSM() })],
-			view,
-		});
-
-		if (extent) {
-			view.fit(extent, { padding: [20, 20, 20, 20] });
-
-			const boundaryFeature = new Feature(
-				new Polygon([
-					[
-						[extent[0], extent[1]],
-						[extent[0], extent[3]],
-						[extent[2], extent[3]],
-						[extent[2], extent[1]],
-						[extent[0], extent[1]],
-					],
-				]),
-			);
-
-			const boundaryLayer = new VectorLayer({
-				source: new VectorSource({ features: [boundaryFeature] }),
-				style: new Style({
-					stroke: new Stroke({ color: "red", width: 2 }),
-				}),
-			});
-
-			mapInstance.current.addLayer(boundaryLayer);
-		}
-	}, [session]);
-
-	return (
-		<div className="flex flex-col gap-4">
-			<div className="flex items-center justify-between">
-				<h2 className="text-xl font-bold">{session.name}</h2>
-				<button onClick={clearSelection} className="text-sm text-gray-400 hover:text-white">
-					Clear
-				</button>
-			</div>
-
-			<p className="text-gray-300 text-sm">Scenario: {session.scenario}</p>
-
-			<label className="text-sm">Map Preview:</label>
-			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
-
-			<label className="text-sm">Players in Game:</label>
-			<ul className="bg-gray-700 p-2 rounded text-sm">
-				{session.players.length ? (
-					session.players.map((p) => (
-						<li key={p} className="py-1 border-b border-gray-600 last:border-b-0">
-							{p}
-						</li>
-					))
-				) : (
-					<li className="text-gray-400 italic">No players yet</li>
-				)}
-			</ul>
-
-			<Link
-				to="/session/$sessionId"
-				params={{ sessionId: session.id }}
-				className="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold text-center"
-			>
-				Join Session
-			</Link>
-		</div>
-	);
-}
