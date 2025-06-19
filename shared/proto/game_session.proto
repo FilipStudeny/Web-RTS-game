@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package game_session;
+
+// Request to start a session
+message StartSessionRequest {
+  string user_id = 1;
+  string scenario_id = 2;
+}
+
+// Response after starting a session
+message StartSessionResponse {
+  string session_id = 1;
+}
+
+// Request to join an existing session
+message JoinSessionRequest {
+  string user_id = 1;
+  string session_id = 2;
+}
+
+// Response after joining a session
+message JoinSessionResponse {
+}
+
+// A single session summary
+message SessionSummary {
+  string session_id = 1;
+  string scenario_id = 2;
+  string state = 3;
+  string player1 = 4;
+  string player2 = 5;
+}
+
+// List of sessions
+message SessionList {
+  repeated SessionSummary sessions = 1;
+}

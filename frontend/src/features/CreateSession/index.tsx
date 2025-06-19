@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import Feature from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
@@ -20,6 +21,8 @@ import {
 } from "@/actions/models/ObjectiveState";
 import { UnitSide } from "@/actions/proto/create_scenario";
 import { ObjectiveState as ProtoObjectiveState } from "@/actions/proto/create_scenario";
+import { useStartSession } from "@/actions/sessions/startSession";
+import { useSocketStore } from "@/integrations/stores/useSocketStore";
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
 
@@ -28,57 +31,48 @@ interface Props {
 	setPassword: (value: string)=> void,
 }
 
-export default function CreateSessionForm({
-	password,
-	setPassword,
-}: Props) {
-	// Refs for map, source
+export default function CreateSessionForm({ password, setPassword }: Props) {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
 	const featureSource = useRef(new VectorSource());
 
-	// State
 	const [passwordEnabled, setPasswordEnabled] = useState(false);
-	const [selectedScenario, setSelectedScenario] = useState<string>("");
+	const [selectedScenario, setSelectedScenario] = useState("");
 
-	// Data hooks
-	const { data: scenarioOptions, isLoading: scenariosLoading } = useScenarioList();
+	const { data: scenarioOptions = [], isLoading: scenariosLoading } = useScenarioList();
 	const { data: areaTypes } = useGetEditorAreaTypes();
 	const { data: fullScenario } = useGetScenarioById(selectedScenario, { enabled: !!selectedScenario });
 
-	// Build area‐style factory
+	const { userId } = useSocketStore();
+	const { mutateAsync: startSession, isPending, error } = useStartSession();
+	const navigate = useNavigate();
+
 	const getAreaStyle = useRef<ReturnType<typeof createAreaStyleFactory> | null>(null);
+
 	useEffect(() => {
 		if (!areaTypes) return;
-		const configs = areaTypes.map(a => ({
-			type: a.name.toLowerCase(),
-			label: a.name,
-			color: a.color,
-			fill: true,
-		}));
-		getAreaStyle.current = createAreaStyleFactory(configs);
+		getAreaStyle.current = createAreaStyleFactory(
+			areaTypes.map(a => ({
+				type: a.name.toLowerCase(),
+				label: a.name,
+				color: a.color,
+				fill: true,
+			})),
+		);
 	}, [areaTypes]);
 
-	// Initialize map & layer
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
 
 		const vectorLayer = new VectorLayer({
 			source: featureSource.current,
 			style: feature => {
-				const t = feature.get("type");
-
-				// 1) Units
-				if (t === "unit") {
-					return getUnitStyle(
-						feature.get("unitIcon"),
-						feature.get("side"),
-						false,
-					);
+				const type = feature.get("type");
+				if (type === "unit") {
+					return getUnitStyle(feature.get("unitIcon"), feature.get("side"), false);
 				}
 
-				// 2) Objectives
-				if (t === "objective") {
+				if (type === "objective") {
 					const state = feature.get("state") as ObjectiveState;
 					const cfg = OBJECTIVE_STATE_STYLE_MAP[state];
 
@@ -96,17 +90,13 @@ export default function CreateSessionForm({
 					});
 				}
 
-				// 3) Everything else → area (forest, city, etc.)
 				return getAreaStyle.current?.(feature, false);
 			},
 		});
 
 		const map = new Map({
 			target: mapRef.current,
-			layers: [
-				new TileLayer({ source: new OSM() }),
-				vectorLayer,
-			],
+			layers: [new TileLayer({ source: new OSM() }), vectorLayer],
 			view: new View({ center: fromLonLat([0, 0]), zoom: 2 }),
 			controls: [new ScaleLine({ units: "metric", minWidth: 64 })],
 			interactions: [],
@@ -115,45 +105,38 @@ export default function CreateSessionForm({
 		mapInstance.current = map;
 	}, []);
 
-	// Draw all features when scenario loads
 	useEffect(() => {
 		if (!mapInstance.current || !fullScenario || !getAreaStyle.current) return;
 		const src = featureSource.current;
 		src.clear();
 
-		// Units
 		fullScenario.units.forEach(u => {
 			if (!u.position) return;
-			const coord = fromLonLat([u.position.lon, u.position.lat]);
-			const f = new Feature(new Point(coord));
+			const f = new Feature(new Point(fromLonLat([u.position.lon, u.position.lat])));
 			f.set("type", "unit");
 			f.set("side", u.side === UnitSide.ENEMY ? "enemy" : "ally");
 			f.set("unitIcon", u.icon);
 			src.addFeature(f);
 		});
 
-		// Objectives
 		fullScenario.objectives.forEach(o => {
 			if (!o.position) return;
-			const coord = fromLonLat([o.position.lon, o.position.lat]);
-			const f = new Feature(new Point(coord));
+			const f = new Feature(new Point(fromLonLat([o.position.lon, o.position.lat])));
 			f.set("type", "objective");
 			f.set("letter", o.letter);
-
 			const stateKey =
-        o.state === ProtoObjectiveState.CAPTURING ? "capturing" :
-        	o.state === ProtoObjectiveState.CAPTURED ? "captured" :
-        		"neutral";
+				o.state === ProtoObjectiveState.CAPTURING
+					? "capturing"
+					: o.state === ProtoObjectiveState.CAPTURED
+						? "captured"
+						: "neutral";
 			f.set("state", stateKey);
 			src.addFeature(f);
 		});
 
-		// Areas
 		fullScenario.areas.forEach(area => {
-			area.coordinates.forEach(ringData => {
-				const coords = ringData.points.map(p => fromLonLat([p.lon, p.lat]));
-
-				// close ring
+			area.coordinates.forEach(ring => {
+				const coords = ring.points.map(p => fromLonLat([p.lon, p.lat]));
 				if (coords.length > 1) {
 					const [x0, y0] = coords[0];
 					const [xN, yN] = coords[coords.length - 1];
@@ -166,9 +149,21 @@ export default function CreateSessionForm({
 			});
 		});
 
-		// fit view
 		mapInstance.current.getView().fit(src.getExtent(), { padding: [20, 20, 20, 20] });
 	}, [fullScenario, areaTypes]);
+
+	const handleStartSession = async () => {
+		if (!userId || !selectedScenario) return;
+		try {
+			const res = await startSession({ userId, scenarioId: selectedScenario });
+			navigate({
+				to: "/session/$sessionId",
+				params: { sessionId: res.sessionId },
+			});
+		} catch (err) {
+			console.error("Start session failed:", err);
+		}
+	};
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -182,16 +177,15 @@ export default function CreateSessionForm({
 				disabled={scenariosLoading}
 			>
 				<option value="">-- Select Scenario --</option>
-				{scenarioOptions?.map(s => (
-					<option key={s.id} value={String(s.id)}>{s.name}</option>
+				{scenarioOptions.map(s => (
+					<option key={s.id} value={s.id}>
+						{s.name}
+					</option>
 				))}
 			</select>
 
 			<label className="text-sm">Preview Map:</label>
-			<div
-				ref={mapRef}
-				className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden"
-			/>
+			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
 
 			<div className="flex items-center gap-2 mt-2">
 				<input
@@ -216,8 +210,16 @@ export default function CreateSessionForm({
 				/>
 			)}
 
-			<button className="mt-4 bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-semibold">
-				Start Session
+			{error && (
+				<p className="text-sm text-red-500">Failed to start session. Please try again.</p>
+			)}
+
+			<button
+				className="mt-4 bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-semibold disabled:opacity-50"
+				onClick={handleStartSession}
+				disabled={isPending || !selectedScenario || !userId}
+			>
+				{isPending ? "Starting..." : "Start Session"}
 			</button>
 		</div>
 	);

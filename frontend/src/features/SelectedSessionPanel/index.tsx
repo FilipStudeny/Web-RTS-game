@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import Feature from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
@@ -11,12 +11,16 @@ import VectorSource from "ol/source/Vector";
 import { Style, Stroke } from "ol/style";
 import { useEffect, useRef } from "react";
 
+import { useJoinSession } from "@/actions/sessions/joinSession";
+import { useSocketStore } from "@/integrations/stores/useSocketStore";
+
 interface Props {
 	session: {
-		id: string,
-		name: string,
-		scenario: string,
-		players: string[],
+		sessionId: string,
+		scenarioId: string,
+		player1: string,
+		player2?: string,
+		state: string,
 	},
 	clearSelection: ()=> void,
 }
@@ -31,6 +35,10 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
 
+	const navigate = useNavigate();
+	const { userId } = useSocketStore();
+	const { mutateAsync: joinSession, isPending, error } = useJoinSession();
+
 	useEffect(() => {
 		if (!mapRef.current) return;
 
@@ -40,8 +48,6 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 		}
 
 		const view = new View({ center: [0, 0], zoom: 2 });
-		const extent = scenarioBounds[session.scenario];
-
 		const scaleLine = new ScaleLine({ units: "metric", minWidth: 64 });
 
 		mapInstance.current = new Map({
@@ -52,10 +58,11 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 			view,
 		});
 
+		const extent = scenarioBounds[session.scenarioId];
 		if (extent) {
 			view.fit(extent, { padding: [20, 20, 20, 20] });
 
-			const boundaryFeature = new Feature(
+			const boundary = new Feature(
 				new Polygon([
 					[
 						[extent[0], extent[1]],
@@ -67,35 +74,51 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 				]),
 			);
 
-			const boundaryLayer = new VectorLayer({
-				source: new VectorSource({ features: [boundaryFeature] }),
+			const vector = new VectorLayer({
+				source: new VectorSource({ features: [boundary] }),
 				style: new Style({
 					stroke: new Stroke({ color: "red", width: 2 }),
 				}),
 			});
 
-			mapInstance.current.addLayer(boundaryLayer);
+			mapInstance.current.addLayer(vector);
 		}
 	}, [session]);
+
+	const handleJoin = async () => {
+		if (!userId) return;
+
+		try {
+			await joinSession({
+				sessionId: session.sessionId,
+				userId,
+			});
+			navigate({ to: "/session/$sessionId", params: { sessionId: session.sessionId } });
+		} catch (err) {
+			console.error("Failed to join session", err);
+		}
+	};
+
+	const players = [session.player1, session.player2].filter(Boolean);
 
 	return (
 		<div className="flex flex-col gap-4">
 			<div className="flex items-center justify-between">
-				<h2 className="text-xl font-bold">{session.name}</h2>
+				<h2 className="text-xl font-bold">Session {session.sessionId}</h2>
 				<button onClick={clearSelection} className="text-sm text-gray-400 hover:text-white">
 					Clear
 				</button>
 			</div>
 
-			<p className="text-gray-300 text-sm">Scenario: {session.scenario}</p>
+			<p className="text-gray-300 text-sm">Scenario: {session.scenarioId}</p>
 
 			<label className="text-sm">Map Preview:</label>
 			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
 
 			<label className="text-sm">Players in Game:</label>
 			<ul className="bg-gray-700 p-2 rounded text-sm">
-				{session.players.length ? (
-					session.players.map((p) => (
+				{players.length ? (
+					players.map((p) => (
 						<li key={p} className="py-1 border-b border-gray-600 last:border-b-0">
 							{p}
 						</li>
@@ -105,13 +128,17 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 				)}
 			</ul>
 
-			<Link
-				to="/session/$sessionId"
-				params={{ sessionId: session.id }}
-				className="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold text-center"
+			{error && (
+				<p className="text-sm text-red-500">Could not join session. Try again later.</p>
+			)}
+
+			<button
+				onClick={handleJoin}
+				disabled={isPending || !userId}
+				className="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold text-center disabled:opacity-50"
 			>
-				Join Session
-			</Link>
+				{isPending ? "Joining..." : "Join Session"}
+			</button>
 		</div>
 	);
 }

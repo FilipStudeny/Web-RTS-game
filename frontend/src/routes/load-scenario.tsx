@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { useGetSessions } from "@/actions/sessions/getSessions";
 import CreateSessionForm from "@/features/CreateSession";
 import SelectedSessionPanel from "@/features/SelectedSessionPanel";
 
@@ -9,15 +10,14 @@ export const Route = createFileRoute("/load-scenario")({
 });
 
 function LoadScenarioPage() {
-	const sessions = [
-		{ id: "1", name: "Operation Thunder", ip: "192.168.0.101", scenario: "Desert Assault", players: ["Alpha", "Bravo"] },
-		{ id: "2", name: "Red Dawn", ip: "192.168.0.102", scenario: "Arctic Conflict", players: ["Echo", "Foxtrot", "Zulu"] },
-		{ id: "3", name: "Steel Strike", ip: "192.168.0.103", scenario: "Urban Siege", players: ["Delta"] },
-	];
+	const { data: sessions = [], isLoading, error } = useGetSessions();
 
 	const [creating, setCreating] = useState(false);
 	const [password, setPassword] = useState("");
 	const [selectedSession, setSelectedSession] = useState<typeof sessions[0] | null>(null);
+
+	if (isLoading) return <div className="text-white p-4">Loading sessions...</div>;
+	if (error) return <div className="text-red-500 p-4">Failed to load sessions.</div>;
 
 	return (
 		<div className="flex w-full h-full text-white bg-gray-900">
@@ -35,21 +35,21 @@ function LoadScenarioPage() {
 					<tbody>
 						{sessions.map((session) => (
 							<tr
-								key={session.id}
+								key={session.sessionId}
 								onClick={() => setSelectedSession(session)}
 								className={`bg-gray-700 hover:bg-gray-600 transition rounded cursor-pointer ${
-									selectedSession?.id === session.id ? "ring-2 ring-blue-500" : ""
+									selectedSession?.sessionId === session.sessionId ? "ring-2 ring-blue-500" : ""
 								}`}
 							>
 								<td className="px-2 py-2">
-									<div className="font-semibold">{session.name}</div>
-									<div className="text-xs text-gray-400">{session.ip}</div>
+									<div className="font-semibold">Session {session.sessionId}</div>
+									<div className="text-xs text-gray-400">Players: {session.player1}{session.player2 ? ` & ${session.player2}` : ""}</div>
 								</td>
-								<td className="px-2 py-2">{session.scenario}</td>
+								<td className="px-2 py-2">{session.scenarioId}</td>
 								<td className="px-2 py-2 text-right">
 									<Link
 										to="/session/$sessionId"
-										params={{ sessionId: session.id }}
+										params={{ sessionId: session.sessionId }}
 										className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm font-semibold"
 									>
 										Join
@@ -88,4 +88,3 @@ function LoadScenarioPage() {
 		</div>
 	);
 }
-
