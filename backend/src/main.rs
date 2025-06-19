@@ -2,7 +2,7 @@ use redis::TypedCommands;
 mod models;
 
 use std::{fs, net::SocketAddr, path::Path as FsPath, sync::Arc};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use axum::{
     Router,
     body::Bytes,
@@ -14,6 +14,8 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use axum::extract::ws::Utf8Bytes;
+use futures::{SinkExt, StreamExt};
 use models::proto::{
     Area as PbArea, AreaList as PbAreaList, Scenario, ScenarioList, ScenarioSummary,
     UnitType as PbUnitType, UnitTypeKey, UnitTypeList as PbUnitTypeList,
@@ -31,15 +33,9 @@ use tracing_subscriber;
 use uuid::Uuid;
 use redis::{AsyncCommands, Client as RedisClient, Connection};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tracing::log::warn;
-use crate::models::proto::{JoinSessionRequest, JoinSessionResponse, SessionList, StartSessionRequest, StartSessionResponse};
-
-#[derive(Clone)]
-struct AppState {
-    db: Arc<Database>,
-    redis: Arc<tokio::sync::Mutex<Connection>>,
-}
-
+use crate::models::proto::{ws_server_message, GameStartedEvent, JoinSessionRequest, JoinSessionResponse, SessionList, SessionReadyEvent, StartSessionRequest, StartSessionResponse, WsServerMessage};
 
 #[derive(Deserialize)]
 struct StartSessionInput {
@@ -61,31 +57,36 @@ struct SessionSummary {
     player1: String,
     player2: Option<String>,
 }
+#[derive(Deserialize)]
+struct StartGameInput {
+    session_id: String,
+}
+type Tx = tokio::sync::mpsc::UnboundedSender<Message>;
 
+#[derive(Clone)]
+struct AppState {
+    db: Arc<Database>,
+    redis: Arc<Mutex<Connection>>,
+    sockets: Arc<Mutex<HashMap<String, Tx>>>,
+}
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .compact()
-        .init();
+    tracing_subscriber::fmt().with_target(false).compact().init();
 
     let db_client = Client::with_uri_str("mongodb://localhost:27017")
         .await
         .expect("Failed to connect to MongoDB");
     let db = Arc::new(db_client.database("simulation"));
 
-    let redis_client = RedisClient::open("redis://127.0.0.1/")
-        .expect("Failed to create Redis client");
+    let redis_client = RedisClient::open("redis://127.0.0.1/").expect("Failed to create Redis client");
+    let redis_conn = redis_client.get_connection().expect("Failed to connect to Redis");
 
-    let redis_conn = redis_client
-        .get_connection()
-        .expect("Failed to connect to Redis");
-
-    let redis = Arc::new(tokio::sync::Mutex::new(redis_conn));
-
-    let state = AppState { db, redis };
-
+    let state = AppState {
+        db,
+        redis: Arc::new(Mutex::new(redis_conn)),
+        sockets: Arc::new(Mutex::new(HashMap::new())),
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -99,76 +100,65 @@ async fn main() {
         .route("/api/scenario.pb", post(receive_scenario_protobuf))
         .route("/api/scenario/{id}/pb", get(get_scenario_by_id_protobuf))
         .route("/api/scenario-list.pb", get(list_scenario_summaries_protobuf))
-
-        .route("/api/session/start", post(start_session))
         .route("/api/session/join", post(join_session))
+        .route("/api/session/start", post(start_session))
         .route("/api/session-list", get(list_sessions))
+        .route("/api/session/start-game", post(start_game))
         .with_state(state.clone())
         .layer(cors);
 
     let listener = TcpListener::bind("0.0.0.0:9999").await.unwrap();
+
     info!("Server running at:");
     info!("- WebSocket: ws://localhost:9999/ws");
     info!("- REST API: http://localhost:9999/api/scenario.pb");
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+
+
 }
 
-
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): State<AppState>) -> impl IntoResponse {
     info!("Client connected: {}", addr.ip());
-    ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-async fn handle_socket(
-    mut socket: WebSocket,
-    addr: SocketAddr,
-    state: AppState,
-) {
+async fn handle_socket(socket: WebSocket, state: AppState) {
     let user_id = Uuid::new_v4().to_string();
+    let (mut sender, mut receiver) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
-    {
-        let mut redis = state.redis.lock().await;
-        let _: () = redis.set_ex(format!("online:{}", user_id), "1", 60).unwrap_or(());
-    }
+    // Save socket sender for later messages (e.g., session-ready)
+    state.sockets.lock().await.insert(user_id.clone(), tx.clone());
 
-    if socket.send(Message::Text(user_id.clone().into())).await.is_err() {
-        error!("Failed to send welcome message to {}", addr);
-        return;
-    }
-
-    info!("Assigned ID: {} to connected user at {}", user_id, addr.ip());
-
-    while let Some(Ok(msg)) = socket.recv().await {
-        match msg {
-            Message::Text(text) => {
-                info!("Received from {}: {}", user_id, text);
-                let mut redis = state.redis.lock().await;
-                if let Err(e) = redis.expire(format!("online:{}", user_id), 60) {
-                    error!("Failed to refresh TTL for {}: {}", user_id, e);
-                }
-            }
-            Message::Close(_) => {
-                info!("{} disconnected", user_id);
+    // Spawn background task to forward messages from rx to WebSocket
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sender.send(msg).await.is_err() {
                 break;
             }
-            _ => {}
+        }
+    });
+
+    // Send the user_id as the first message through the tx
+    let _ = tx.send(Message::Text(Utf8Bytes::from(user_id.clone())));
+
+    info!("Assigned ID: {}", user_id);
+
+    // Handle incoming pings / TTL refresh
+    while let Some(Ok(msg)) = receiver.next().await {
+        if let Message::Text(_) = msg {
+            let mut redis = state.redis.lock().await;
+            let _ = redis.expire(format!("online:{}", user_id), 60);
         }
     }
 
-    {
-        let mut redis = state.redis.lock().await;
-        if let Err(e) = redis.del(format!("online:{}", user_id)) {
-            error!("Failed to delete online status for {}: {}", user_id, e);
-        }
-    }
+    state.sockets.lock().await.remove(&user_id);
+    let mut redis = state.redis.lock().await;
+    let _ = redis.del(format!("online:{}", user_id));
+    info!("{} disconnected", user_id);
 }
+
 
 
 pub fn load_configs_from_file<T: DeserializeOwned>(path: &FsPath) -> Result<Vec<T>, String> {
@@ -445,46 +435,50 @@ pub async fn list_scenario_summaries_protobuf(
 
 // Session creation
 async fn start_session(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
-    info!("POST /api/session/start");
+    info!("📨 Received POST /api/session/start ({} bytes)", body.len());
 
     let request = match StartSessionRequest::decode(&*body) {
         Ok(r) => {
-            info!("Decoded StartSessionRequest: user_id={}, scenario_id={}", r.user_id, r.scenario_id);
+            info!("✅ Decoded StartSessionRequest: user_id={}, scenario_id={}", r.user_id, r.scenario_id);
             r
         },
         Err(e) => {
-            warn!("Failed to decode StartSessionRequest: {}", e);
+            warn!("❌ Failed to decode StartSessionRequest: {}", e);
             return (StatusCode::BAD_REQUEST, format!("Protobuf decode error: {}", e)).into_response();
         }
     };
 
     let session_id = Uuid::new_v4().to_string();
     let key = format!("session:{}", session_id);
-    info!("Creating session with ID: {}", session_id);
+    info!("🆕 Creating session with ID: {}", session_id);
 
     let mut redis = state.redis.lock().await;
 
-    if let Err(e) = redis.hset_multiple(&key, &[
+    match redis.hset_multiple(&key, &[
         ("scenario_id", request.scenario_id.as_str()),
         ("state", "idle"),
         ("player1", request.user_id.as_str()),
     ]) {
-        error!("Redis hset_multiple failed: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
+        Ok(_) => info!("✅ Stored session metadata in Redis"),
+        Err(e) => {
+            error!("❌ Redis hset_multiple failed: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
+        }
     }
 
-    if let Err(e) = redis.sadd::<_, _>(format!("session_users:{}", session_id), &request.user_id) {
-        error!("Redis sadd failed: {}", e);
+    match redis.sadd::<_, _>(format!("session_users:{}", session_id), &request.user_id) {
+        Ok(_) => info!("👤 Added player1 '{}' to session user set", request.user_id),
+        Err(e) => warn!("⚠️ Redis sadd failed: {}", e),
     }
 
-    let response = StartSessionResponse { session_id };
+    let response = StartSessionResponse { session_id: session_id.clone() };
     let mut buf = Vec::new();
     if response.encode(&mut buf).is_err() {
-        error!("Failed to encode StartSessionResponse");
+        error!("❌ Failed to encode StartSessionResponse");
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode protobuf").into_response();
     }
 
-    info!("Session successfully created");
+    info!("✅ Session '{}' successfully created", session_id);
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
@@ -492,15 +486,15 @@ async fn start_session(State(state): State<AppState>, body: Bytes) -> impl IntoR
 }
 
 async fn join_session(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
-    info!("POST /api/session/join");
+    info!("📨 Received POST /api/session/join ({} bytes)", body.len());
 
     let request = match JoinSessionRequest::decode(&*body) {
         Ok(r) => {
-            info!("Decoded JoinSessionRequest: session_id={}, user_id={}", r.session_id, r.user_id);
+            info!("✅ Decoded JoinSessionRequest: session_id={}, user_id={}", r.session_id, r.user_id);
             r
         },
         Err(e) => {
-            warn!("Failed to decode JoinSessionRequest: {}", e);
+            warn!("❌ Failed to decode JoinSessionRequest: {}", e);
             return (StatusCode::BAD_REQUEST, format!("Protobuf decode error: {}", e)).into_response();
         }
     };
@@ -508,48 +502,62 @@ async fn join_session(State(state): State<AppState>, body: Bytes) -> impl IntoRe
     let key = format!("session:{}", request.session_id);
     let mut redis = state.redis.lock().await;
 
-    let state_value = match redis.hget::<String, Option<String>>(key.clone(), Option::from(String::from("state".to_string()))) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            warn!("Session not found for key: {}", key);
-            return (StatusCode::NOT_FOUND, "Session not found").into_response();
-        },
-        Err(e) => {
-            error!("Redis error while getting session state: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
-        },
-    };
+    let state_value = redis.hget::<_, Option<String>>(&key, Some("state".to_string())).unwrap_or(None);
+    info!("🔍 Fetched session state: {:?}", state_value);
 
-    if state_value != "idle" {
-        warn!("Session {} already in progress", request.session_id);
+    if state_value.as_deref() != Some("idle") {
+        warn!("🚫 Session '{}' already in progress or invalid state", request.session_id);
         return (StatusCode::CONFLICT, "Session already in progress").into_response();
     }
 
-    if let Err(e) = redis.hset_multiple(&key, &[
+    let player1_opt = redis.hget::<_, Option<String>>(&key, Some("player1".to_string())).unwrap_or(None);
+    info!("👤 Fetched player1 for session '{}': {:?}", request.session_id, player1_opt);
+
+    match redis.hset_multiple(&key, &[
         ("player2", request.user_id.as_str()),
         ("state", "progressing"),
     ]) {
-        error!("Redis hset_multiple failed: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
+        Ok(_) => info!("✅ Set player2 and updated session state to 'progressing'"),
+        Err(e) => warn!("⚠️ Failed to update session state/player2: {}", e),
     }
 
-    if let Err(e) = redis.sadd::<_, _>(format!("session_users:{}", request.session_id), &request.user_id) {
-        error!("Redis sadd failed: {}", e);
+    match redis.sadd::<_, _>(format!("session_users:{}", request.session_id), &request.user_id) {
+        Ok(_) => info!("👥 Added player2 '{}' to session user set", request.user_id),
+        Err(e) => warn!("⚠️ Redis sadd failed for player2: {}", e),
     }
 
-    let response = JoinSessionResponse {};
+    // Notify player1 via WebSocket
+    if let Some(player1_id) = player1_opt {
+        if let Some(tx) = state.sockets.lock().await.get(&player1_id) {
+            let message = WsServerMessage {
+                payload: Some(ws_server_message::Payload::SessionReady(SessionReadyEvent {
+                    session_id: request.session_id.clone(),
+                    player2: request.user_id.clone(),
+                })),
+            };
+            let mut buf = Vec::new();
+            match message.encode(&mut buf) {
+                Ok(_) => {
+                    let _ = tx.send(Message::Binary(Bytes::from(buf)));
+                    info!("📢 Sent SessionReadyEvent to player1 '{}'", player1_id);
+                },
+                Err(e) => error!("❌ Failed to encode SessionReadyEvent: {}", e),
+            }
+        } else {
+            warn!("⚠️ No socket found for player1 '{}'", player1_id);
+        }
+    }
+
     let mut buf = Vec::new();
-    if response.encode(&mut buf).is_err() {
-        error!("Failed to encode JoinSessionResponse");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode protobuf").into_response();
-    }
-
-    info!("User {} successfully joined session {}", request.user_id, request.session_id);
+    let _ = JoinSessionResponse {}.encode(&mut buf);
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
+    info!("✅ join_session response ready for user {}", request.user_id);
     (headers, buf).into_response()
 }
+
+
 
 // Disconnect user and clean up session if empty
 async fn disconnect_user(State(state): State<AppState>, Path(user_id): Path<String>) -> impl IntoResponse {
@@ -607,4 +615,50 @@ async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
     (headers, buf).into_response()
+}
+
+async fn start_game(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
+    let input = match serde_json::from_slice::<StartGameInput>(&body) {
+        Ok(data) => data,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid input: {}", e)).into_response();
+        }
+    };
+
+    info!("🎮 Starting game for session: {}", input.session_id);
+
+    let mut redis = state.redis.lock().await;
+    let user_set_key = format!("session_users:{}", input.session_id);
+    let users: HashSet<String> = match redis.smembers(&user_set_key) {
+        Ok(set) => set,
+        Err(e) => {
+            error!("Failed to get session users: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get session users").into_response();
+        }
+    };
+
+    let message = WsServerMessage {
+        payload: Some(ws_server_message::Payload::GameStarted(GameStartedEvent {
+            session_id: input.session_id.clone(),
+        })),
+    };
+
+    let mut buf = Vec::new();
+    if message.encode(&mut buf).is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode GameStartedEvent").into_response();
+    }
+
+    let txs = state.sockets.lock().await;
+    let count = users.iter().filter(|uid| {
+        if let Some(tx) = txs.get(*uid) {
+            let _ = tx.send(Message::Binary(buf.clone().into()));
+            true
+        } else {
+            false
+        }
+    }).count();
+
+    info!("✅ Notified {} players about game start", count);
+
+    (StatusCode::OK, "Game started").into_response()
 }

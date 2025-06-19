@@ -44,6 +44,31 @@ export interface SessionList {
   sessions: SessionSummary[];
 }
 
+/** Message sent when a session becomes ready (player2 joined) */
+export interface SessionReadyEvent {
+  sessionId: string;
+  player2: string;
+}
+
+/** WebSocket envelope for incoming client -> server messages (optional) */
+export interface WsClientMessage {
+  /** Add more client-side messages as needed */
+  ping?: string | undefined;
+}
+
+/** Sent when the creator starts the game */
+export interface GameStartedEvent {
+  sessionId: string;
+}
+
+export interface WsServerMessage {
+  sessionReady?:
+    | SessionReadyEvent
+    | undefined;
+  /** 👈 ADD THIS */
+  gameStarted?: GameStartedEvent | undefined;
+}
+
 function createBaseStartSessionRequest(): StartSessionRequest {
   return { userId: "", scenarioId: "" };
 }
@@ -479,6 +504,278 @@ export const SessionList: MessageFns<SessionList> = {
   fromPartial<I extends Exact<DeepPartial<SessionList>, I>>(object: I): SessionList {
     const message = createBaseSessionList();
     message.sessions = object.sessions?.map((e) => SessionSummary.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSessionReadyEvent(): SessionReadyEvent {
+  return { sessionId: "", player2: "" };
+}
+
+export const SessionReadyEvent: MessageFns<SessionReadyEvent> = {
+  encode(message: SessionReadyEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.player2 !== "") {
+      writer.uint32(18).string(message.player2);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionReadyEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionReadyEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.player2 = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionReadyEvent {
+    return {
+      sessionId: isSet(object.sessionId) ? globalThis.String(object.sessionId) : "",
+      player2: isSet(object.player2) ? globalThis.String(object.player2) : "",
+    };
+  },
+
+  toJSON(message: SessionReadyEvent): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.player2 !== "") {
+      obj.player2 = message.player2;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionReadyEvent>, I>>(base?: I): SessionReadyEvent {
+    return SessionReadyEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionReadyEvent>, I>>(object: I): SessionReadyEvent {
+    const message = createBaseSessionReadyEvent();
+    message.sessionId = object.sessionId ?? "";
+    message.player2 = object.player2 ?? "";
+    return message;
+  },
+};
+
+function createBaseWsClientMessage(): WsClientMessage {
+  return { ping: undefined };
+}
+
+export const WsClientMessage: MessageFns<WsClientMessage> = {
+  encode(message: WsClientMessage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.ping !== undefined) {
+      writer.uint32(10).string(message.ping);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WsClientMessage {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWsClientMessage();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.ping = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WsClientMessage {
+    return { ping: isSet(object.ping) ? globalThis.String(object.ping) : undefined };
+  },
+
+  toJSON(message: WsClientMessage): unknown {
+    const obj: any = {};
+    if (message.ping !== undefined) {
+      obj.ping = message.ping;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WsClientMessage>, I>>(base?: I): WsClientMessage {
+    return WsClientMessage.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WsClientMessage>, I>>(object: I): WsClientMessage {
+    const message = createBaseWsClientMessage();
+    message.ping = object.ping ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGameStartedEvent(): GameStartedEvent {
+  return { sessionId: "" };
+}
+
+export const GameStartedEvent: MessageFns<GameStartedEvent> = {
+  encode(message: GameStartedEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GameStartedEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGameStartedEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GameStartedEvent {
+    return { sessionId: isSet(object.sessionId) ? globalThis.String(object.sessionId) : "" };
+  },
+
+  toJSON(message: GameStartedEvent): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GameStartedEvent>, I>>(base?: I): GameStartedEvent {
+    return GameStartedEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GameStartedEvent>, I>>(object: I): GameStartedEvent {
+    const message = createBaseGameStartedEvent();
+    message.sessionId = object.sessionId ?? "";
+    return message;
+  },
+};
+
+function createBaseWsServerMessage(): WsServerMessage {
+  return { sessionReady: undefined, gameStarted: undefined };
+}
+
+export const WsServerMessage: MessageFns<WsServerMessage> = {
+  encode(message: WsServerMessage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionReady !== undefined) {
+      SessionReadyEvent.encode(message.sessionReady, writer.uint32(10).fork()).join();
+    }
+    if (message.gameStarted !== undefined) {
+      GameStartedEvent.encode(message.gameStarted, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WsServerMessage {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWsServerMessage();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionReady = SessionReadyEvent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.gameStarted = GameStartedEvent.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WsServerMessage {
+    return {
+      sessionReady: isSet(object.sessionReady) ? SessionReadyEvent.fromJSON(object.sessionReady) : undefined,
+      gameStarted: isSet(object.gameStarted) ? GameStartedEvent.fromJSON(object.gameStarted) : undefined,
+    };
+  },
+
+  toJSON(message: WsServerMessage): unknown {
+    const obj: any = {};
+    if (message.sessionReady !== undefined) {
+      obj.sessionReady = SessionReadyEvent.toJSON(message.sessionReady);
+    }
+    if (message.gameStarted !== undefined) {
+      obj.gameStarted = GameStartedEvent.toJSON(message.gameStarted);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WsServerMessage>, I>>(base?: I): WsServerMessage {
+    return WsServerMessage.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WsServerMessage>, I>>(object: I): WsServerMessage {
+    const message = createBaseWsServerMessage();
+    message.sessionReady = (object.sessionReady !== undefined && object.sessionReady !== null)
+      ? SessionReadyEvent.fromPartial(object.sessionReady)
+      : undefined;
+    message.gameStarted = (object.gameStarted !== undefined && object.gameStarted !== null)
+      ? GameStartedEvent.fromPartial(object.gameStarted)
+      : undefined;
     return message;
   },
 };

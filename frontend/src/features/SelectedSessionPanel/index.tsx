@@ -9,7 +9,7 @@ import VectorLayer from "ol/layer/Vector";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
 import { Style, Stroke } from "ol/style";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useJoinSession } from "@/actions/sessions/joinSession";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
@@ -35,10 +35,10 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
 
-	const navigate = useNavigate();
-	const { userId } = useSocketStore();
+	const { userId, sessionReady, gameStartedSessionId } = useSocketStore();
 	const { mutateAsync: joinSession, isPending, error } = useJoinSession();
-
+	const navigate = useNavigate();
+	const [hasJoined, setHasJoined] = useState(false);
 	useEffect(() => {
 		if (!mapRef.current) return;
 
@@ -93,13 +93,23 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 				sessionId: session.sessionId,
 				userId,
 			});
-			navigate({ to: "/session/$sessionId", params: { sessionId: session.sessionId } });
+			setHasJoined(true);
 		} catch (err) {
 			console.error("Failed to join session", err);
 		}
 	};
 
-	const players = [session.player1, session.player2].filter(Boolean);
+	useEffect(() => {
+		if (sessionReady?.sessionId === session.sessionId) {
+			navigate({ to: "/session/$sessionId", params: { sessionId: session.sessionId } });
+		}
+	}, [sessionReady, session.sessionId]);
+
+	useEffect(() => {
+		if (gameStartedSessionId === session.sessionId) {
+			navigate({ to: "/session/$sessionId", params: { sessionId: session.sessionId } });
+		}
+	}, [gameStartedSessionId, session.sessionId]);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -110,35 +120,47 @@ export default function SelectedSessionPanel({ session, clearSelection }: Props)
 				</button>
 			</div>
 
-			<p className="text-gray-300 text-sm">Scenario: {session.scenarioId}</p>
+			{hasJoined ? (
+				<div className="p-4 border border-green-500 rounded text-green-300 bg-green-900/20">
+					<p className="text-sm mb-1">Successfully joined the session!</p>
+					<p className="font-mono text-lg">ID: {session.sessionId}</p>
 
-			<label className="text-sm">Map Preview:</label>
-			<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
+					{gameStartedSessionId === session.sessionId ? (
+						<p className="text-sm text-blue-300 mt-2">🎮 Game is starting...</p>
+					) : (
+						<p className="text-sm mt-2">Waiting for host to start the game...</p>
+					)}
+				</div>
+			) : (
+				<>
+					<p className="text-gray-300 text-sm">Scenario: {session.scenarioId}</p>
 
-			<label className="text-sm">Players in Game:</label>
-			<ul className="bg-gray-700 p-2 rounded text-sm">
-				{players.length ? (
-					players.map((p) => (
-						<li key={p} className="py-1 border-b border-gray-600 last:border-b-0">
-							{p}
-						</li>
-					))
-				) : (
-					<li className="text-gray-400 italic">No players yet</li>
-				)}
-			</ul>
+					<label className="text-sm">Map Preview:</label>
+					<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
 
-			{error && (
-				<p className="text-sm text-red-500">Could not join session. Try again later.</p>
+					<label className="text-sm">Players in Game:</label>
+					<ul className="bg-gray-700 p-2 rounded text-sm">
+						{[session.player1, session.player2].filter(Boolean).map((p) => (
+							<li key={p} className="py-1 border-b border-gray-600 last:border-b-0">
+								{p}
+							</li>
+						))}
+					</ul>
+
+					{error && (
+						<p className="text-sm text-red-500">Could not join session. Try again later.</p>
+					)}
+
+					<button
+						onClick={handleJoin}
+						disabled={isPending || !userId}
+						className="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold text-center disabled:opacity-50"
+					>
+						{isPending ? "Joining..." : "Join Session"}
+					</button>
+				</>
 			)}
-
-			<button
-				onClick={handleJoin}
-				disabled={isPending || !userId}
-				className="mt-4 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold text-center disabled:opacity-50"
-			>
-				{isPending ? "Joining..." : "Join Session"}
-			</button>
 		</div>
 	);
+
 }

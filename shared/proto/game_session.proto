@@ -36,3 +36,31 @@ message SessionSummary {
 message SessionList {
   repeated SessionSummary sessions = 1;
 }
+
+// --- WebSocket messages ---
+
+// Message sent when a session becomes ready (player2 joined)
+message SessionReadyEvent {
+  string session_id = 1;
+  string player2 = 2;
+}
+
+
+// WebSocket envelope for incoming client -> server messages (optional)
+message WsClientMessage {
+  oneof payload {
+    string ping = 1;
+  }
+}
+
+// Sent when the creator starts the game
+message GameStartedEvent {
+  string session_id = 1;
+}
+
+message WsServerMessage {
+  oneof payload {
+    SessionReadyEvent session_ready = 1;
+    GameStartedEvent game_started = 2;
+  }
+}
