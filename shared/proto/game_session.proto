@@ -58,9 +58,16 @@ message GameStartedEvent {
   string session_id = 1;
 }
 
+message GameEndedEvent {
+  string session_id = 1;
+  string winner_id = 2;
+  string reason = 3; // e.g., "Opponent disconnected"
+}
+
 message WsServerMessage {
   oneof payload {
     SessionReadyEvent session_ready = 1;
     GameStartedEvent game_started = 2;
+    GameEndedEvent game_ended = 3;
   }
 }

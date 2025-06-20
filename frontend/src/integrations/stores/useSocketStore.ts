@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { WsServerMessage } from "@/actions/proto/game_session";
+import { GameEndedEvent, SessionReadyEvent, WsServerMessage } from "@/actions/proto/game_session";
 
 type Status = "idle" | "connecting" | "connected" | "disconnected" | "error";
 
@@ -8,8 +8,9 @@ interface SocketStore {
 	socket: WebSocket | null,
 	userId: string | null,
 	status: Status,
-	sessionReady: { sessionId: string, player2: string } | null,
+	sessionReady: SessionReadyEvent | null,
 	gameStartedSessionId: string | null,
+	gameEnded: GameEndedEvent | null,
 	connect: ()=> void,
 }
 
@@ -19,7 +20,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
 	status: "idle",
 	sessionReady: null,
 	gameStartedSessionId: null,
-
+	gameEnded: null,
 	connect: () => {
 		if (get().socket) return;
 
@@ -54,6 +55,12 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
 					const { sessionId } = msg.gameStarted;
 					set({ gameStartedSessionId: sessionId });
 				}
+
+				if (msg.gameEnded) {
+					const { sessionId, winnerId, reason } = msg.gameEnded;
+					set({ gameEnded: { sessionId, winnerId, reason } });
+				}
+
 			} catch (err) {
 				console.error("Failed to decode WebSocket message:", err);
 			}

@@ -3,12 +3,14 @@ import Map from "ol/Map";
 import VectorSource from "ol/source/Vector";
 import { useRef, useState } from "react";
 
+import { useDisconnectUser } from "@/actions/sessions/disconnectPlayer";
 import { ChatPanel } from "@/features/ChatPanel";
 import { GameMap, type Area } from "@/features/GameMap";
 import { MeasurePanel } from "@/features/MeasurePanel";
 import { ObjectiveBar, type Objective } from "@/features/ObjectiveBar";
 import { ResourcesPanel } from "@/features/ResourcesPanel";
 import { UnitInfoPanel, type Unit } from "@/features/UnitDetailPanel";
+import { useSocketStore } from "@/integrations/stores/useSocketStore";
 
 function scaleRing(ring: [number, number][], factor: number): [number, number][] {
 	const cx = ring.reduce((sum, c) => sum + c[0], 0) / ring.length;
@@ -41,6 +43,8 @@ function RouteComponent() {
 	const [measureActive, setMeasureActive] = useState(false);
 	const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
 	const measureSourceRef = useRef<VectorSource>(new VectorSource());
+	const { gameEnded, userId } = useSocketStore();
+	const { mutate: disconnect, isPending, isError } = useDisconnectUser();
 
 	const [objectives, setObjectives] = useState<Objective[]>([
 		{ letter: "A", state: "captured", position: [-0.1276, 51.5074] }, // London
@@ -130,6 +134,31 @@ function RouteComponent() {
 				<ChatPanel open={chatOpen} setOpen={setChatOpen} />
 
 			</div>
+
+			{gameEnded && gameEnded.winnerId === userId && (
+				<div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black bg-opacity-90 text-white">
+					<div className="text-center max-w-lg px-6">
+						<h2 className="text-4xl font-bold mb-4">🎉 You Win!</h2>
+						<p className="text-xl">The opponent has disconnected.</p>
+						<p className="mt-2 text-sm text-gray-300">{gameEnded.reason}</p>
+
+						<button
+							className="mt-6 px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg text-lg font-semibold transition disabled:opacity-50"
+							onClick={() => {
+								if (userId) disconnect(userId);
+							}}
+							disabled={isPending}
+						>
+							{isPending ? "Disconnecting..." : "Confirm"}
+						</button>
+
+						{isError && (
+							<p className="mt-3 text-sm text-red-400">❌ Failed to disconnect. Please try again.</p>
+						)}
+					</div>
+				</div>
+			)}
+
 		</div>
 	);
 }

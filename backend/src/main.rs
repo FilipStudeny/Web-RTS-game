@@ -1,5 +1,6 @@
 use redis::TypedCommands;
 mod models;
+mod routes;
 
 use std::{fs, net::SocketAddr, path::Path as FsPath, sync::Arc};
 use std::collections::{HashMap, HashSet};
@@ -35,7 +36,8 @@ use redis::{AsyncCommands, Client as RedisClient, Connection};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::log::warn;
-use crate::models::proto::{ws_server_message, GameStartedEvent, JoinSessionRequest, JoinSessionResponse, SessionList, SessionReadyEvent, StartSessionRequest, StartSessionResponse, WsServerMessage};
+use routes::get_unit_types::get_unit_types;
+use crate::models::proto::{ws_server_message, GameEndedEvent, GameStartedEvent, JoinSessionRequest, JoinSessionResponse, SessionList, SessionReadyEvent, StartSessionRequest, StartSessionResponse, WsServerMessage};
 
 #[derive(Deserialize)]
 struct StartSessionInput {
@@ -95,15 +97,16 @@ async fn main() {
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/api/unit-types.pb", get(list_unit_types_protobuf))
-        .route("/api/area-types.pb", get(list_area_types_protobuf))
-        .route("/api/scenario.pb", post(receive_scenario_protobuf))
-        .route("/api/scenario/{id}/pb", get(get_scenario_by_id_protobuf))
-        .route("/api/scenario-list.pb", get(list_scenario_summaries_protobuf))
+        .route("/api/unit-types.pb", get(get_unit_types))
+        .route("/api/area-types.pb", get(routes::get_area_types::list_area_types_protobuf))
+        .route("/api/scenario.pb", post(routes::create_scenario::create_scenario))
+        .route("/api/scenario/{id}/pb", get(routes::get_scenario_by_id::get_scenario_by_id_protobuf))
+        .route("/api/scenario-list.pb", get(routes::get_scenarios::get_scenarios))
         .route("/api/session/join", post(join_session))
         .route("/api/session/start", post(start_session))
         .route("/api/session-list", get(list_sessions))
         .route("/api/session/start-game", post(start_game))
+        .route("/api/session/disconnect/{user_id}", post(disconnect_user))
         .with_state(state.clone())
         .layer(cors);
 
@@ -114,7 +117,6 @@ async fn main() {
     info!("- REST API: http://localhost:9999/api/scenario.pb");
 
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
-
 
 }
 
@@ -128,8 +130,16 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
-    // Save socket sender for later messages (e.g., session-ready)
+    // Store socket sender in memory
     state.sockets.lock().await.insert(user_id.clone(), tx.clone());
+
+    // Store online status in Redis without expiration
+    {
+        let mut redis = state.redis.lock().await;
+        if let Err(e) = redis.set(format!("online:{}", user_id), "1") {
+            warn!("❌ Failed to set online status for {}: {}", user_id, e);
+        }
+    }
 
     // Spawn background task to forward messages from rx to WebSocket
     tokio::spawn(async move {
@@ -140,26 +150,42 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         }
     });
 
-    // Send the user_id as the first message through the tx
+    // Send the user_id as the first message
     let _ = tx.send(Message::Text(Utf8Bytes::from(user_id.clone())));
 
     info!("Assigned ID: {}", user_id);
 
-    // Handle incoming pings / TTL refresh
+    // Handle incoming messages (e.g., pings)
     while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(_) = msg {
-            let mut redis = state.redis.lock().await;
-            let _ = redis.expire(format!("online:{}", user_id), 60);
+        match msg {
+            Message::Text(_) => {
+                // No TTL update needed
+            }
+            Message::Ping(_) | Message::Pong(_) => {
+                //  pings/pongs
+            }
+            Message::Close(_) => {
+                break;
+            }
+            _ => {}
         }
     }
 
+    // Cleanup on disconnect
     state.sockets.lock().await.remove(&user_id);
-    let mut redis = state.redis.lock().await;
-    let _ = redis.del(format!("online:{}", user_id));
+
+    {
+        let mut redis = state.redis.lock().await;
+
+        if let Err(e) = redis.del(format!("online:{}", user_id)) {
+            warn!("❌ Failed to delete online status for {}: {}", user_id, e);
+        }
+
+        cleanup_user_sessions(&user_id, &mut *redis, &state.sockets).await;
+    }
+
     info!("{} disconnected", user_id);
 }
-
-
 
 pub fn load_configs_from_file<T: DeserializeOwned>(path: &FsPath) -> Result<Vec<T>, String> {
     let content =
@@ -183,49 +209,6 @@ pub fn load_configs_from_dir<T: DeserializeOwned>(dir: &FsPath) -> Result<Vec<T>
     Ok(result)
 }
 
-pub async fn list_unit_types_protobuf() -> impl IntoResponse {
-    let config_file = FsPath::new("../shared/configs/units-config.json");
-
-    let raw_units: Vec<serde_json::Value> = match load_configs_from_file(config_file) {
-        Ok(units) => units,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
-    };
-
-    let proto_units: Vec<PbUnitType> = raw_units
-        .into_iter()
-        .filter_map(|val| {
-            let type_str = val.get("type")?.as_str()?.to_ascii_uppercase();
-            let key = UnitTypeKey::from_str_name(&type_str)? as i32;
-            Some(PbUnitType {
-                r#type: key,
-                name: val.get("name")?.as_str()?.to_string(),
-                description: val.get("description")?.as_str()?.to_string(),
-                icon: val.get("icon")?.as_str()?.to_string(),
-                health: val.get("health")?.as_u64()? as u32,
-                accuracy: val.get("accuracy")?.as_f64()? as f32,
-                sight_range: val.get("sight_range")?.as_f64()? as f32,
-                movement_speed: val.get("movement_speed")?.as_f64()? as f32,
-            })
-        })
-        .collect();
-
-    let unit_list = PbUnitTypeList {
-        unit_types: proto_units,
-    };
-
-    let mut buffer = Vec::new();
-    if unit_list.encode(&mut buffer).is_err() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Protobuf encoding failed",
-        )
-            .into_response();
-    }
-
-    let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/protobuf".parse().unwrap());
-    (headers, buffer).into_response()
-}
 
 #[derive(serde::Deserialize)]
 struct RawArea {
@@ -235,202 +218,6 @@ struct RawArea {
     pub movement_speed_modifier: f32,
     pub accuracy_modifier: f32,
     pub enemy_miss_chance: f32,
-}
-
-pub async fn list_area_types_protobuf() -> impl IntoResponse {
-    let config_file = FsPath::new("../shared/configs/areas-config.json");
-
-    let raw_areas: Vec<RawArea> = match load_configs_from_file(config_file) {
-        Ok(data) => data,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-    };
-
-    let proto_areas: Vec<PbArea> = raw_areas
-        .into_iter()
-        .map(|a| PbArea {
-            name: a.name,
-            description: a.description,
-            color: a.color,
-            movement_speed_modifier: a.movement_speed_modifier,
-            accuracy_modifier: a.accuracy_modifier,
-            enemy_miss_chance: a.enemy_miss_chance,
-        })
-        .collect();
-
-    let area_list = PbAreaList { areas: proto_areas };
-
-    let mut buffer = Vec::new();
-    if area_list.encode(&mut buffer).is_err() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Protobuf encoding failed",
-        )
-            .into_response();
-    }
-
-    let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/protobuf".parse().unwrap());
-    (headers, buffer).into_response()
-}
-
-pub async fn receive_scenario_protobuf(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
-    match Scenario::decode(body) {
-        Ok(scenario) => {
-            info!("Received scenario: {}", scenario.name);
-            match to_bson(&scenario) {
-                Ok(bson) => {
-                    let doc = bson.as_document().unwrap().clone();
-                    let collection = state.db.collection("scenarios");
-
-                    match collection.insert_one(doc).await {
-                        Ok(result) => {
-                            info!("Scenario saved with id: {}", result.inserted_id);
-                            (StatusCode::OK, "Scenario saved").into_response()
-                        }
-                        Err(e) => {
-                            error!("Failed to insert scenario: {}", e);
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Failed to save scenario: {}", e),
-                            )
-                                .into_response()
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to convert scenario to BSON: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Serialization error: {}", e),
-                    )
-                        .into_response()
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to decode scenario: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Invalid Protobuf data: {}", e),
-            )
-                .into_response()
-        }
-    }
-}
-
-pub async fn get_scenario_by_id_protobuf(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    let obj_id = match ObjectId::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, format!("Invalid ObjectId: {}", id)).into_response();
-        }
-    };
-
-    let collection = state.db.collection::<Document>("scenarios");
-
-    match collection.find_one(doc! { "_id": obj_id }).await {
-        Ok(Some(doc)) => match bson::from_document::<Scenario>(doc) {
-            Ok(scenario) => {
-                let mut buffer = Vec::new();
-                if scenario.encode(&mut buffer).is_err() {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Protobuf encoding failed".to_string(),
-                    )
-                        .into_response();
-                }
-
-                let mut headers = HeaderMap::new();
-                headers.insert("Content-Type", "application/protobuf".parse().unwrap());
-                (headers, buffer).into_response()
-            }
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to decode BSON into Scenario: {}", e),
-            )
-                .into_response(),
-        },
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            format!("Scenario not found with ID {}", id),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Database error: {}", e),
-        )
-            .into_response(),
-    }
-}
-
-pub async fn list_scenario_summaries_protobuf(
-    State(state): State<AppState>
-) -> impl IntoResponse {
-    let collection = state.db.collection::<Document>("scenarios");
-
-    let cursor = match collection.find(doc! {}).await {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to query scenarios: {}", e),
-            )
-                .into_response();
-        }
-    };
-
-    let mut summaries = Vec::new();
-
-    use futures::StreamExt;
-    let mut cursor = cursor;
-    while let Some(doc_result) = cursor.next().await {
-        match doc_result {
-            Ok(doc) => {
-                let id = doc
-                    .get_object_id("_id")
-                    .map(|oid| oid.to_hex())
-                    .unwrap_or_default();
-
-                let name = doc
-                    .get_str("NAME")
-                    .or_else(|_| doc.get_str("name"))
-                    .unwrap_or("Unnamed")
-                    .to_string();
-
-                summaries.push(ScenarioSummary { id, name });
-            }
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cursor error: {}", e),
-                )
-                    .into_response();
-            }
-        }
-    }
-
-    let list = ScenarioList {
-        scenarios: summaries,
-    };
-
-    let mut buffer = Vec::new();
-    if list.encode(&mut buffer).is_err() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Protobuf encoding failed".to_string(),
-        )
-            .into_response();
-    }
-
-    let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/protobuf".parse().unwrap());
-    (headers, buffer).into_response()
 }
 
 // Session creation
@@ -563,25 +350,17 @@ async fn join_session(State(state): State<AppState>, body: Bytes) -> impl IntoRe
 async fn disconnect_user(State(state): State<AppState>, Path(user_id): Path<String>) -> impl IntoResponse {
     info!("POST /api/session/disconnect/{}", user_id);
     let mut redis = state.redis.lock().await;
-    let keys: Vec<String> = redis.keys("session_users:*").unwrap_or_default();
 
-    for key in keys {
-        if redis.sismember(&key, &user_id).unwrap_or(false) {
-            info!("Removing user {} from set {}", user_id, key);
-            let _ = redis.srem::<_, _>(&key, &user_id);
-
-            if redis.scard::<_>(&key).unwrap_or(1) == 0 {
-                let session_id = key.strip_prefix("session_users:").unwrap_or("");
-                info!("Session {} is empty. Cleaning up.", session_id);
-                let _ = redis.del::<_>(format!("session:{}", session_id));
-                let _ = redis.del::<_>(&key);
-            }
-        }
+    cleanup_user_sessions(&user_id, &mut *redis, &state.sockets).await;
+    
+    if let Err(e) = redis.del(format!("online:{}", user_id)) {
+        warn!("❌ Failed to delete online status for {}: {}", user_id, e);
     }
 
-    info!("User {} disconnected", user_id);
+    info!("✅ User {} disconnected and sessions cleaned up", user_id);
     (StatusCode::OK, "User disconnected").into_response()
 }
+
 
 // List all sessions using Protobuf
 async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
@@ -661,4 +440,62 @@ async fn start_game(State(state): State<AppState>, body: Bytes) -> impl IntoResp
     info!("✅ Notified {} players about game start", count);
 
     (StatusCode::OK, "Game started").into_response()
+}
+
+
+// Helper to clean up user from sessions and remove empty sessions
+async fn cleanup_user_sessions(user_id: &str, redis: &mut impl TypedCommands, sockets: &Arc<Mutex<HashMap<String, Tx>>>) {
+    let keys: Vec<String> = redis.keys("session_users:*").unwrap_or_default();
+
+    for key in keys {
+        if redis.sismember(&key, user_id).unwrap_or(false) {
+            info!("Removing user {} from set {}", user_id, key);
+            let _ = redis.srem::<_, _>(&key, user_id);
+
+            let session_id = key.strip_prefix("session_users:").unwrap_or("").to_string();
+
+            // Get session info
+            let session_key = format!("session:{}", session_id);
+            let session_data = redis.hgetall::<_>(&session_key).unwrap_or_default();
+
+            let maybe_opponent = if session_data.get("player1") == Some(&user_id.to_string()) {
+                session_data.get("player2").cloned()
+            } else if session_data.get("player2") == Some(&user_id.to_string()) {
+                session_data.get("player1").cloned()
+            } else {
+                None
+            };
+
+            if let Some(opponent_id) = maybe_opponent {
+                info!("User {} disconnected, notifying opponent {}", user_id, opponent_id);
+
+                let msg = WsServerMessage {
+                    payload: Some(ws_server_message::Payload::GameEnded(GameEndedEvent {
+                        session_id: session_id.clone(),
+                        winner_id: opponent_id.clone(),
+                        reason: format!("Player {} disconnected", user_id),
+                    })),
+                };
+
+                let mut buf = Vec::new();
+                if msg.encode(&mut buf).is_ok() {
+                    if let Some(tx) = sockets.lock().await.get(&opponent_id) {
+                        let _ = tx.send(Message::Binary(Bytes::from(buf)));
+                        info!("✅ Notified {} about win due to opponent disconnect", opponent_id);
+                    } else {
+                        warn!("⚠️ Socket for opponent {} not found", opponent_id);
+                    }
+                } else {
+                    error!("❌ Failed to encode GameEndedEvent");
+                }
+            }
+
+            // Clean up the session if empty
+            if redis.scard::<_>(&key).unwrap_or(1) == 0 {
+                info!("Session {} is empty. Cleaning up.", session_id);
+                let _ = redis.del(&session_key);
+                let _ = redis.del(&key);
+            }
+        }
+    }
 }
