@@ -1,32 +1,15 @@
 import { useNavigate } from "@tanstack/react-router";
-import Feature from "ol/Feature";
-import Map from "ol/Map";
-import View from "ol/View";
-import { ScaleLine } from "ol/control";
-import { Point, Polygon } from "ol/geom";
-import TileLayer from "ol/layer/Tile";
-import VectorLayer from "ol/layer/Vector";
-import { fromLonLat } from "ol/proj";
-import OSM from "ol/source/OSM";
-import VectorSource from "ol/source/Vector";
-import { Style, Stroke, Fill, Text, Circle as CircleStyle } from "ol/style";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+
+import { GameMapPreview } from "../GameMap";
 
 import { useGetEditorAreaTypes } from "@/actions/getEditorAreaTypes";
 import { useGetScenarioById } from "@/actions/getScenarioById";
 import { useScenarioList } from "@/actions/getScenarios";
-import {
-	type ObjectiveState,
-	OBJECTIVE_STATE_STYLE_MAP,
-} from "@/actions/models/ObjectiveState";
-import { UnitSide } from "@/actions/proto/create_scenario";
-import { ObjectiveState as ProtoObjectiveState } from "@/actions/proto/create_scenario";
 import { useCloseSession } from "@/actions/sessions/closeSession";
 import { useStartGame } from "@/actions/sessions/startGame";
 import { useStartSession } from "@/actions/sessions/startSession";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
-import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
-import { getUnitStyle } from "@/utils/renderEntity";
 
 interface Props {
 	password: string,
@@ -34,10 +17,6 @@ interface Props {
 }
 
 export default function CreateSessionForm({ password, setPassword }: Props) {
-	const mapRef = useRef<HTMLDivElement | null>(null);
-	const mapInstance = useRef<Map | null>(null);
-	const featureSource = useRef(new VectorSource());
-
 	const [passwordEnabled, setPasswordEnabled] = useState(false);
 	const [selectedScenario, setSelectedScenario] = useState("");
 	const [sessionCreatedId, setSessionCreatedId] = useState<string | null>(null);
@@ -49,112 +28,8 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 	const { userId, sessionReady } = useSocketStore();
 	const { mutateAsync: startSession, isPending, error } = useStartSession();
 	const { mutate: closeSession, isPending: isClosing } = useCloseSession();
-	const navigate = useNavigate();
 	const { mutateAsync: startGame, isPending: isStartingGame } = useStartGame();
-	const getAreaStyle = useRef<ReturnType<typeof createAreaStyleFactory> | null>(null);
-
-	useEffect(() => {
-		if (!areaTypes) return;
-		getAreaStyle.current = createAreaStyleFactory(
-			areaTypes.map((a) => ({
-				type: a.name.toLowerCase(),
-				label: a.name,
-				color: a.color,
-				fill: true,
-			})),
-		);
-	}, [areaTypes]);
-
-	useEffect(() => {
-		if (!mapRef.current || mapInstance.current) return;
-
-		const vectorLayer = new VectorLayer({
-			source: featureSource.current,
-			style: (feature) => {
-				const type = feature.get("type");
-				if (type === "unit") {
-					return getUnitStyle(feature.get("unitIcon"), feature.get("side"), false);
-				}
-
-				if (type === "objective") {
-					const state = feature.get("state") as ObjectiveState;
-					const cfg = OBJECTIVE_STATE_STYLE_MAP[state];
-
-					return new Style({
-						image: new CircleStyle({
-							radius: 10,
-							fill: new Fill({ color: cfg.fill }),
-							stroke: new Stroke({ color: cfg.stroke, width: 2 }),
-						}),
-						text: new Text({
-							text: feature.get("letter"),
-							font: "12px sans-serif",
-							fill: new Fill({ color: cfg.text }),
-						}),
-					});
-				}
-
-				return getAreaStyle.current?.(feature, false);
-			},
-		});
-
-		const map = new Map({
-			target: mapRef.current,
-			layers: [new TileLayer({ source: new OSM() }), vectorLayer],
-			view: new View({ center: fromLonLat([0, 0]), zoom: 2 }),
-			controls: [new ScaleLine({ units: "metric", minWidth: 64 })],
-			interactions: [],
-		});
-
-		mapInstance.current = map;
-	}, []);
-
-	useEffect(() => {
-		if (!mapInstance.current || !fullScenario || !getAreaStyle.current) return;
-		const src = featureSource.current;
-		src.clear();
-
-		fullScenario.units.forEach((u) => {
-			if (!u.position) return;
-			const f = new Feature(new Point(fromLonLat([u.position.lon, u.position.lat])));
-			f.set("type", "unit");
-			f.set("side", u.side === UnitSide.ENEMY ? "enemy" : "ally");
-			f.set("unitIcon", u.icon);
-			src.addFeature(f);
-		});
-
-		fullScenario.objectives.forEach((o) => {
-			if (!o.position) return;
-			const f = new Feature(new Point(fromLonLat([o.position.lon, o.position.lat])));
-			f.set("type", "objective");
-			f.set("letter", o.letter);
-			const stateKey =
-				o.state === ProtoObjectiveState.CAPTURING
-					? "capturing"
-					: o.state === ProtoObjectiveState.CAPTURED
-						? "captured"
-						: "neutral";
-			f.set("state", stateKey);
-			src.addFeature(f);
-		});
-
-		fullScenario.areas.forEach((area) => {
-			area.coordinates.forEach((ring) => {
-				const coords = ring.points.map((p) => fromLonLat([p.lon, p.lat]));
-				if (coords.length > 1) {
-					const [x0, y0] = coords[0];
-					const [xN, yN] = coords[coords.length - 1];
-					if (x0 !== xN || y0 !== yN) coords.push([x0, y0]);
-				}
-
-				const poly = new Feature(new Polygon([coords]));
-				poly.set("type", area.type.toLowerCase());
-				src.addFeature(poly);
-			});
-		});
-
-		mapInstance.current.getView().fit(src.getExtent(), { padding: [20, 20, 20, 20] });
-	}, [fullScenario, areaTypes]);
+	const navigate = useNavigate();
 
 	const handleStartSession = async () => {
 		if (!userId || !selectedScenario) return;
@@ -168,7 +43,6 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 
 	const handleStartGame = async () => {
 		if (!sessionCreatedId) return;
-
 		try {
 			await startGame(sessionCreatedId);
 			navigate({ to: "/session/$sessionId", params: { sessionId: sessionCreatedId } });
@@ -183,7 +57,6 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 			await closeSession(sessionCreatedId);
 			setSessionCreatedId(null);
 			setSelectedScenario("");
-			featureSource.current.clear(); // clear the map visuals
 		} catch (err) {
 			console.error("Failed to close session:", err);
 		}
@@ -214,7 +87,8 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 						</div>
 					) : (
 						<>
-							<p className="text-sm mt-2">Waiting for another player to join...</p><div className="mt-4">
+							<p className="text-sm mt-2">Waiting for another player to join...</p>
+							<div className="mt-4">
 								<button
 									onClick={handleCloseSession}
 									disabled={isClosing}
@@ -222,7 +96,6 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 								>
 									{isClosing ? "Closing..." : "Close Session"}
 								</button>
-
 							</div>
 						</>
 					)}
@@ -245,8 +118,13 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 					</select>
 
 					<label className="text-sm">Preview Map:</label>
-					<div ref={mapRef} className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden" />
-
+					{fullScenario && areaTypes && (
+						<GameMapPreview
+							scenario={fullScenario}
+							areaTypes={areaTypes}
+							className="w-full aspect-[4/3] rounded border border-gray-600 overflow-hidden"
+						/>
+					)}
 					<div className="flex items-center gap-2 mt-2">
 						<input
 							type="checkbox"
@@ -270,9 +148,7 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 						/>
 					)}
 
-					{error && (
-						<p className="text-sm text-red-500">Failed to start session. Please try again.</p>
-					)}
+					{error && <p className="text-sm text-red-500">Failed to start session. Please try again.</p>}
 
 					<button
 						className="mt-4 bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-semibold disabled:opacity-50"
