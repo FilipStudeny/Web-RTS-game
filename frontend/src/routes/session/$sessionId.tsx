@@ -15,6 +15,7 @@ import { AreaInfoPanel } from "@/features/AreaInfoPanel";
 import { ChatPanel } from "@/features/ChatPanel";
 import { GameMapPreview } from "@/features/GameMap";
 import { MeasurePanel } from "@/features/MeasurePanel";
+import { ObjectiveBar, type Objective } from "@/features/ObjectiveBar";
 import { ResourcesPanel } from "@/features/ResourcesPanel";
 import { UnitInfoPanel } from "@/features/UnitDetailPanel";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
@@ -38,7 +39,6 @@ function RouteComponent() {
 	const [selectedUnit, setSelectedUnitRaw] = useState<Unit | null>(null);
 	const [selectedArea, setSelectedAreaRaw] = useState<ScenarioArea | null>(null);
 	const [mapInstance, setMapInstance] = useState<Map | null>(null);
-
 	const setSelectedUnit = (unit: Unit | null) => {
 		setSelectedAreaRaw(null);
 		setSelectedUnitRaw(unit);
@@ -60,6 +60,19 @@ function RouteComponent() {
 		return <div className="text-red-500 p-4">❌ Failed to load session or scenario.</div>;
 	}
 
+	const objectives: Objective[] = (scenario.objectives ?? [])
+		.filter(obj => obj.position !== undefined)
+		.map(obj => ({
+			letter: obj.letter,
+			state:
+		  obj.state === 1
+		  	? "capturing"
+		  	: obj.state === 2
+		  		? "captured"
+		  		: "neutral",
+			position: [obj.position!.lon, obj.position!.lat],
+		}));
+
 	const selectedUnitType = selectedUnit
 		? unitTypes.find((t) => t.type === Number(selectedUnit.unitKey) as UnitTypeKey)
 		: undefined;
@@ -75,6 +88,7 @@ function RouteComponent() {
 	return (
 		<div className="flex flex-1 w-full h-full text-white font-sans">
 			<div className="flex-1 relative">
+				<ObjectiveBar objectives={objectives} map={mapInstance} />
 
 				<GameMapPreview
 					scenario={scenario as Scenario}
