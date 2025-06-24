@@ -97,6 +97,7 @@ function RouteComponent() {
 					onUnitSelect={setSelectedUnit}
 					onAreaSelect={setSelectedArea}
 					onMapReady={setMapInstance}
+					sourceRef={measureSourceRef}
 					className="absolute inset-0 z-0"
 				/>
 
@@ -128,6 +129,7 @@ function RouteComponent() {
 					onClear={() => setMeasuredDistance(null)}
 					show={showMeasurePanel}
 					setShow={setShowMeasurePanel}
+					mapRef={{ current: mapInstance }}
 				/>
 
 				<ChatPanel open={chatOpen} setOpen={setChatOpen} />

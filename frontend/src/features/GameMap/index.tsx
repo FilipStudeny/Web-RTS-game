@@ -8,7 +8,13 @@ import VectorLayer from "ol/layer/Vector";
 import { fromLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
-import { Style, Stroke, Fill, Text, Circle as CircleStyle } from "ol/style";
+import {
+	Style,
+	Stroke,
+	Fill,
+	Text,
+	Circle as CircleStyle,
+} from "ol/style";
 import { useEffect, useRef } from "react";
 
 import type { Scenario, ScenarioArea, Unit } from "@/actions/proto/create_scenario";
@@ -26,6 +32,7 @@ interface GameMapPreviewProps {
 	onUnitSelect?: (unit: Unit)=> void,
 	onAreaSelect?: (area: ScenarioArea)=> void,
 	onMapReady?: (map: Map)=> void,
+	sourceRef?: React.RefObject<VectorSource>,
 }
 
 export function GameMapPreview({
@@ -36,11 +43,12 @@ export function GameMapPreview({
 	onUnitSelect,
 	onAreaSelect,
 	onMapReady,
+	sourceRef,
 }: GameMapPreviewProps) {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
 	const featureSource = useRef(new VectorSource());
-	const selectedFeatureRef = useRef<any>(null); // 🔸 Track selected feature
+	const selectedFeatureRef = useRef<any>(null);
 
 	const getAreaStyle = useRef(
 		createAreaStyleFactory(
@@ -56,18 +64,23 @@ export function GameMapPreview({
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
 
-		const vectorLayer = new VectorLayer({
+		const mainLayer = new VectorLayer({
 			source: featureSource.current,
 			style: (feature) => {
 				const isSelected = selectedFeatureRef.current === feature;
 				const type = feature.get("type");
 
 				if (type === "unit") {
-					return getUnitStyle(feature.get("unitIcon"), feature.get("side"), isSelected);
+					return getUnitStyle(
+						feature.get("unitIcon"),
+						feature.get("side"),
+						isSelected,
+					);
 				}
 
 				if (type === "objective") {
-					const state = feature.get("state") as keyof typeof OBJECTIVE_STATE_STYLE_MAP;
+					const state =
+            feature.get("state") as keyof typeof OBJECTIVE_STATE_STYLE_MAP;
 					const cfg = OBJECTIVE_STATE_STYLE_MAP[state];
 
 					return new Style({
@@ -88,10 +101,23 @@ export function GameMapPreview({
 			},
 		});
 
+		const measureLayer = new VectorLayer({
+			source: sourceRef?.current ?? new VectorSource(),
+			style: new Style({
+				stroke: new Stroke({
+					color: "#f59e0b",
+					width: 2,
+				}),
+			}),
+		});
+
 		const map = new Map({
 			target: mapRef.current,
-			layers: [new TileLayer({ source: new OSM() }), vectorLayer],
-			view: new View({ center: fromLonLat([0, 0]), zoom: 2 }),
+			layers: [new TileLayer({ source: new OSM() }), mainLayer, measureLayer],
+			view: new View({
+				center: fromLonLat([0, 0]),
+				zoom: 2,
+			}),
 			controls: [new ScaleLine({ units: "metric", minWidth: 64 })],
 			interactions: allowInteraction ? undefined : [],
 		});
@@ -100,9 +126,9 @@ export function GameMapPreview({
 			const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
 			const type = feature?.get("type");
 
-			selectedFeatureRef.current = feature ?? null; // 🔸 Update selection
+			selectedFeatureRef.current = feature ?? null;
 			map.getLayers().forEach((layer) => {
-				if (layer instanceof VectorLayer) layer.changed(); // 🔁 Redraw
+				if (layer instanceof VectorLayer) layer.changed();
 			});
 
 			if (type === "unit") {
@@ -120,7 +146,7 @@ export function GameMapPreview({
 
 		mapInstance.current = map;
 		onMapReady?.(map);
-	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady]);
+	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady, sourceRef]);
 
 	useEffect(() => {
 		if (!mapInstance.current || !scenario) return;
@@ -130,7 +156,9 @@ export function GameMapPreview({
 
 		scenario.units?.forEach((u) => {
 			if (!u.position) return;
-			const f = new Feature(new Point(fromLonLat([u.position.lon, u.position.lat])));
+			const f = new Feature(
+				new Point(fromLonLat([u.position.lon, u.position.lat])),
+			);
 			f.set("type", "unit");
 			f.set("unitIcon", u.icon);
 			f.set("side", u.side === UnitSide.ENEMY ? "enemy" : "ally");
@@ -140,7 +168,9 @@ export function GameMapPreview({
 
 		scenario.objectives?.forEach((o) => {
 			if (!o.position) return;
-			const f = new Feature(new Point(fromLonLat([o.position.lon, o.position.lat])));
+			const f = new Feature(
+				new Point(fromLonLat([o.position.lon, o.position.lat])),
+			);
 			f.set("type", "objective");
 			f.set("letter", o.letter);
 			f.set("state", o.state === 1 ? "capturing" : o.state === 2 ? "captured" : "neutral");
