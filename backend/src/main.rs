@@ -105,6 +105,8 @@ async fn main() {
         .route("/api/session/join", post(join_session))
         .route("/api/session/start", post(start_session))
         .route("/api/session/close/{session_id}", post(close_session))
+        .route("/api/session/{session_id}", get(get_session_by_id))
+
         .route("/api/session-list", get(list_sessions))
         .route("/api/session/start-game", post(start_game))
         .route("/api/session/disconnect/{user_id}", post(disconnect_user))
@@ -227,16 +229,18 @@ async fn start_session(State(state): State<AppState>, body: Bytes) -> impl IntoR
 
     let request = match StartSessionRequest::decode(&*body) {
         Ok(r) => {
-            info!("✅ Decoded StartSessionRequest: user_id={}, scenario_id={}", r.user_id, r.scenario_id);
+            info!(
+                "✅ Decoded StartSessionRequest: user_id={}, scenario_id={}",
+                r.user_id, r.scenario_id
+            );
             r
-        },
+        }
         Err(e) => {
             warn!("❌ Failed to decode StartSessionRequest: {}", e);
             return (StatusCode::BAD_REQUEST, format!("Protobuf decode error: {}", e)).into_response();
         }
     };
 
-    // 🧠 Retrieve scenario name from MongoDB
     let scenario_obj_id = match ObjectId::parse_str(&request.scenario_id) {
         Ok(id) => id,
         Err(_) => {
@@ -245,13 +249,17 @@ async fn start_session(State(state): State<AppState>, body: Bytes) -> impl IntoR
         }
     };
 
-    let scenario_doc = match state.db.collection::<Document>("scenarios")
-        .find_one(doc! { "_id": scenario_obj_id }).await {
+    let scenario_doc = match state
+        .db
+        .collection::<Document>("scenarios")
+        .find_one(doc! { "_id": scenario_obj_id })
+        .await
+    {
         Ok(Some(doc)) => doc,
         Ok(None) => {
             warn!("❌ Scenario not found in DB: {}", request.scenario_id);
             return (StatusCode::NOT_FOUND, String::from("Scenario not found")).into_response();
-        },
+        }
         Err(e) => {
             error!("❌ MongoDB error: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, String::from("DB error")).into_response();
@@ -262,43 +270,71 @@ async fn start_session(State(state): State<AppState>, body: Bytes) -> impl IntoR
         Ok(name) => name.to_string(),
         Err(_) => {
             warn!("❌ Scenario missing 'NAME' field");
-            return (StatusCode::INTERNAL_SERVER_ERROR, String::from("Scenario missing NAME")).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                String::from("Scenario missing NAME"),
+            )
+                .into_response();
         }
     };
-    
-    // ✅ Create session
+
     let session_id = Uuid::new_v4().to_string();
     let key = format!("session:{}", session_id);
+    let user_set_key = format!("session_users:{}", session_id);
 
     let mut redis = state.redis.lock().await;
-    if let Err(e) = redis.hset_multiple(&key, &[
-        ("scenario_id", request.scenario_id.as_str()),
-        ("scenario_name", scenario_name.as_str()),
-        ("state", "idle"),
-        ("player1", request.user_id.as_str()),
-    ]) {
+
+    // 🔐 Store session data
+    if let Err(e) = redis.hset_multiple(
+        &key,
+        &[
+            ("scenario_id", request.scenario_id.as_str()),
+            ("scenario_name", scenario_name.as_str()),
+            ("state", "idle"),
+            ("player1", request.user_id.as_str()),
+        ],
+    ) {
         error!("❌ Redis hset_multiple failed: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
     }
 
-    if let Err(e) = redis.sadd::<_, _>(format!("session_users:{}", session_id), &request.user_id) {
+    // 🧱 Remove TTL to persist the key
+    if let Err(e) = redis.persist(&key) {
+        warn!("⚠️ Failed to persist session {}: {}", key, e);
+    }
+
+    // 👤 Add user to session user set
+    if let Err(e) = redis.sadd::<_, _>(&user_set_key, &request.user_id) {
         warn!("⚠️ Redis sadd failed: {}", e);
     }
 
-    // 🔁 Respond with session ID
-    let response = StartSessionResponse { session_id: session_id.clone() };
+    // 🧱 Ensure user set key is persistent
+    if let Err(e) = redis.persist(&user_set_key) {
+        warn!("⚠️ Failed to persist session user set {}: {}", user_set_key, e);
+    }
+
+    // 🎁 Respond
+    let response = StartSessionResponse {
+        session_id: session_id.clone(),
+    };
     let mut buf = Vec::new();
     if response.encode(&mut buf).is_err() {
         error!("❌ Failed to encode StartSessionResponse");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode protobuf").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to encode protobuf",
+        )
+            .into_response();
     }
 
     info!("✅ Session '{}' successfully created", session_id);
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
+
     (headers, buf).into_response()
 }
+
 
 async fn join_session(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
     info!("📨 Received POST /api/session/join ({} bytes)", body.len());
@@ -583,4 +619,47 @@ async fn close_session(State(state): State<AppState>, Path(session_id): Path<Str
     }
 
     (StatusCode::OK, "Session closed").into_response()
+}
+
+async fn get_session_by_id(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let key = format!("session:{}", session_id);
+    let mut redis = state.redis.lock().await;
+
+    let exists = match redis.exists::<_>(&key) {
+        Ok(true) => true,
+        Ok(false) => return (StatusCode::NOT_FOUND, "Session not found").into_response(),
+        Err(e) => {
+            error!("Redis error: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
+        }
+    };
+
+    let data: HashMap<String, String> = match redis.hgetall(&key) {
+        Ok(map) => map,
+        Err(e) => {
+            error!("Redis fetch error: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
+        }
+    };
+
+    let summary = models::proto::SessionSummary {
+        session_id: session_id.clone(),
+        scenario_id: data.get("scenario_id").cloned().unwrap_or_default(),
+        scenario_name: data.get("scenario_name").cloned().unwrap_or_default(),
+        state: data.get("state").cloned().unwrap_or_else(|| "unknown".into()),
+        player1: data.get("player1").cloned().unwrap_or_default(),
+        player2: data.get("player2").cloned().unwrap_or_default(),
+    };
+
+    let mut buf = Vec::new();
+    if summary.encode(&mut buf).is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode protobuf").into_response();
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert("Content-Type", "application/protobuf".parse().unwrap());
+    (headers, Bytes::from(buf)).into_response()
 }
