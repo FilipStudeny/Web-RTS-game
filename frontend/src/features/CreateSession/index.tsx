@@ -21,6 +21,7 @@ import {
 } from "@/actions/models/ObjectiveState";
 import { UnitSide } from "@/actions/proto/create_scenario";
 import { ObjectiveState as ProtoObjectiveState } from "@/actions/proto/create_scenario";
+import { useCloseSession } from "@/actions/sessions/closeSession";
 import { useStartGame } from "@/actions/sessions/startGame";
 import { useStartSession } from "@/actions/sessions/startSession";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
@@ -47,6 +48,7 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 
 	const { userId, sessionReady } = useSocketStore();
 	const { mutateAsync: startSession, isPending, error } = useStartSession();
+	const { mutate: closeSession, isPending: isClosing } = useCloseSession();
 	const navigate = useNavigate();
 	const { mutateAsync: startGame, isPending: isStartingGame } = useStartGame();
 	const getAreaStyle = useRef<ReturnType<typeof createAreaStyleFactory> | null>(null);
@@ -175,6 +177,18 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 		}
 	};
 
+	const handleCloseSession = async () => {
+		if (!sessionCreatedId) return;
+		try {
+			await closeSession(sessionCreatedId);
+			setSessionCreatedId(null);
+			setSelectedScenario("");
+			featureSource.current.clear(); // clear the map visuals
+		} catch (err) {
+			console.error("Failed to close session:", err);
+		}
+	};
+
 	return (
 		<div className="flex flex-col gap-4">
 			<h2 className="text-xl font-bold mb-2">Create Session</h2>
@@ -199,7 +213,18 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 							</button>
 						</div>
 					) : (
-						<p className="text-sm mt-2">Waiting for another player to join...</p>
+						<>
+							<p className="text-sm mt-2">Waiting for another player to join...</p><div className="mt-4">
+								<button
+									onClick={handleCloseSession}
+									disabled={isClosing}
+									className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-semibold disabled:opacity-50"
+								>
+									{isClosing ? "Closing..." : "Close Session"}
+								</button>
+
+							</div>
+						</>
 					)}
 				</div>
 			) : (

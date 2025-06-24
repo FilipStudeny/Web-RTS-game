@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useGetSessions } from "@/actions/sessions/getSessions";
@@ -29,7 +29,6 @@ function LoadScenarioPage() {
 						<tr className="text-gray-400 text-sm">
 							<th className="px-2">Session</th>
 							<th className="px-2">Scenario</th>
-							<th className="px-2 text-right">Action</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -43,21 +42,16 @@ function LoadScenarioPage() {
 							>
 								<td className="px-2 py-2">
 									<div className="font-semibold">Session {session.sessionId}</div>
-									<div className="text-xs text-gray-400">Players: {session.player1}{session.player2 ? ` & ${session.player2}` : ""}</div>
+									<div className="text-xs text-gray-400">
+										Players: {session.player1}
+										{session.player2 ? ` & ${session.player2}` : ""}
+									</div>
 								</td>
-								<td className="px-2 py-2">{session.scenarioId}</td>
-								<td className="px-2 py-2 text-right">
-									<Link
-										to="/session/$sessionId"
-										params={{ sessionId: session.sessionId }}
-										className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm font-semibold"
-									>
-										Join
-									</Link>
-								</td>
+								<td className="px-2 py-2">{session.scenarioName}</td>
 							</tr>
 						))}
 					</tbody>
+
 				</table>
 			</div>
 

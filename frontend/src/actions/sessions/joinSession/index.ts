@@ -11,14 +11,21 @@ export function useJoinSession() {
 				sessionId: input.sessionId,
 			}).finish();
 
-			const res = await axiosInstance.post("/session/join", payload, {
-				headers: { "Content-Type": "application/protobuf" },
-				responseType: "arraybuffer",
-			});
+			try {
+				const res = await axiosInstance.post("/session/join", payload, {
+					headers: { "Content-Type": "application/protobuf" },
+					responseType: "arraybuffer",
+				});
+				const bytes = new Uint8Array(res.data);
 
-			const bytes = new Uint8Array(res.data);
-
-			return JoinSessionResponse.decode(bytes);
+				return JoinSessionResponse.decode(bytes);
+			} catch (err: any) {
+				const message =
+					err?.response?.data instanceof ArrayBuffer
+						? new TextDecoder().decode(err.response.data)
+						: err?.response?.data || "Failed to join session.";
+				throw new Error(message);
+			}
 		},
 	});
 }

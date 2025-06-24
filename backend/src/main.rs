@@ -104,6 +104,7 @@ async fn main() {
         .route("/api/scenario-list.pb", get(routes::get_scenarios::get_scenarios))
         .route("/api/session/join", post(join_session))
         .route("/api/session/start", post(start_session))
+        .route("/api/session/close/{session_id}", post(close_session))
         .route("/api/session-list", get(list_sessions))
         .route("/api/session/start-game", post(start_game))
         .route("/api/session/disconnect/{user_id}", post(disconnect_user))
@@ -235,29 +236,56 @@ async fn start_session(State(state): State<AppState>, body: Bytes) -> impl IntoR
         }
     };
 
+    // 🧠 Retrieve scenario name from MongoDB
+    let scenario_obj_id = match ObjectId::parse_str(&request.scenario_id) {
+        Ok(id) => id,
+        Err(_) => {
+            warn!("❌ Invalid scenario_id: {}", request.scenario_id);
+            return (StatusCode::BAD_REQUEST, String::from("Invalid scenario_id")).into_response();
+        }
+    };
+
+    let scenario_doc = match state.db.collection::<Document>("scenarios")
+        .find_one(doc! { "_id": scenario_obj_id }).await {
+        Ok(Some(doc)) => doc,
+        Ok(None) => {
+            warn!("❌ Scenario not found in DB: {}", request.scenario_id);
+            return (StatusCode::NOT_FOUND, String::from("Scenario not found")).into_response();
+        },
+        Err(e) => {
+            error!("❌ MongoDB error: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, String::from("DB error")).into_response();
+        }
+    };
+
+    let scenario_name = match scenario_doc.get_str("NAME") {
+        Ok(name) => name.to_string(),
+        Err(_) => {
+            warn!("❌ Scenario missing 'NAME' field");
+            return (StatusCode::INTERNAL_SERVER_ERROR, String::from("Scenario missing NAME")).into_response();
+        }
+    };
+    
+    // ✅ Create session
     let session_id = Uuid::new_v4().to_string();
     let key = format!("session:{}", session_id);
-    info!("🆕 Creating session with ID: {}", session_id);
 
     let mut redis = state.redis.lock().await;
-
-    match redis.hset_multiple(&key, &[
+    if let Err(e) = redis.hset_multiple(&key, &[
         ("scenario_id", request.scenario_id.as_str()),
+        ("scenario_name", scenario_name.as_str()),
         ("state", "idle"),
         ("player1", request.user_id.as_str()),
     ]) {
-        Ok(_) => info!("✅ Stored session metadata in Redis"),
-        Err(e) => {
-            error!("❌ Redis hset_multiple failed: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
-        }
+        error!("❌ Redis hset_multiple failed: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Redis error").into_response();
     }
 
-    match redis.sadd::<_, _>(format!("session_users:{}", session_id), &request.user_id) {
-        Ok(_) => info!("👤 Added player1 '{}' to session user set", request.user_id),
-        Err(e) => warn!("⚠️ Redis sadd failed: {}", e),
+    if let Err(e) = redis.sadd::<_, _>(format!("session_users:{}", session_id), &request.user_id) {
+        warn!("⚠️ Redis sadd failed: {}", e);
     }
 
+    // 🔁 Respond with session ID
     let response = StartSessionResponse { session_id: session_id.clone() };
     let mut buf = Vec::new();
     if response.encode(&mut buf).is_err() {
@@ -289,23 +317,45 @@ async fn join_session(State(state): State<AppState>, body: Bytes) -> impl IntoRe
     let key = format!("session:{}", request.session_id);
     let mut redis = state.redis.lock().await;
 
-    let state_value = redis.hget::<_, Option<String>>(&key, Some("state".to_string())).unwrap_or(None);
-    info!("🔍 Fetched session state: {:?}", state_value);
+    // 🚫 Check if the session exists
+    if !redis.exists::<_>(&key).unwrap_or(false) {
+        warn!("🚫 Session '{}' does not exist", request.session_id);
+        return (StatusCode::NOT_FOUND, "Session does not exist").into_response();
+    }
 
-    if state_value.as_deref() != Some("idle") {
-        warn!("🚫 Session '{}' already in progress or invalid state", request.session_id);
+    // 🔍 Fetch session data
+    let session_data: HashMap<String, String> = redis.hgetall(&key).unwrap_or_default();
+
+    let state_value = session_data.get("state").cloned().unwrap_or_else(|| "unknown".to_string());
+    let player1_opt = session_data.get("player1").cloned();
+    let player2_opt = session_data.get("player2").cloned();
+
+    info!("🔍 Session state: {}, player1: {:?}, player2: {:?}", state_value, player1_opt, player2_opt);
+
+    // 🚫 Reject if both player1 and player2 are filled
+    if player1_opt.is_some() && player2_opt.is_some() {
+        warn!("❌ Session '{}' already has two players", request.session_id);
+        return (StatusCode::CONFLICT, "Session is full").into_response();
+    }
+
+    // 🚫 Reject if already progressing
+    if state_value != "idle" {
+        warn!("❌ Session '{}' is not idle (state={})", request.session_id, state_value);
         return (StatusCode::CONFLICT, "Session already in progress").into_response();
     }
 
-    let player1_opt = redis.hget::<_, Option<String>>(&key, Some("player1".to_string())).unwrap_or(None);
-    info!("👤 Fetched player1 for session '{}': {:?}", request.session_id, player1_opt);
-
-    match redis.hset_multiple(&key, &[
+    // ✅ Proceed with joining
+    let result = redis.hset_multiple(&key, &[
         ("player2", request.user_id.as_str()),
         ("state", "progressing"),
-    ]) {
-        Ok(_) => info!("✅ Set player2 and updated session state to 'progressing'"),
-        Err(e) => warn!("⚠️ Failed to update session state/player2: {}", e),
+    ]);
+
+    match result {
+        Ok(_) => info!("✅ Added player2 '{}' and updated session state", request.user_id),
+        Err(e) => {
+            error!("❌ Failed to update session in Redis: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to join session").into_response();
+        }
     }
 
     match redis.sadd::<_, _>(format!("session_users:{}", request.session_id), &request.user_id) {
@@ -323,28 +373,23 @@ async fn join_session(State(state): State<AppState>, body: Bytes) -> impl IntoRe
                 })),
             };
             let mut buf = Vec::new();
-            match message.encode(&mut buf) {
-                Ok(_) => {
-                    let _ = tx.send(Message::Binary(Bytes::from(buf)));
-                    info!("📢 Sent SessionReadyEvent to player1 '{}'", player1_id);
-                },
-                Err(e) => error!("❌ Failed to encode SessionReadyEvent: {}", e),
+            if message.encode(&mut buf).is_ok() {
+                let _ = tx.send(Message::Binary(Bytes::from(buf)));
+                info!("📢 Sent SessionReadyEvent to player1 '{}'", player1_id);
             }
-        } else {
-            warn!("⚠️ No socket found for player1 '{}'", player1_id);
         }
     }
 
+    // Return response
     let mut buf = Vec::new();
     let _ = JoinSessionResponse {}.encode(&mut buf);
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
+
     info!("✅ join_session response ready for user {}", request.user_id);
     (headers, buf).into_response()
 }
-
-
 
 // Disconnect user and clean up session if empty
 async fn disconnect_user(State(state): State<AppState>, Path(user_id): Path<String>) -> impl IntoResponse {
@@ -378,6 +423,7 @@ async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
                 state: data.get("state").cloned().unwrap_or_default(),
                 player1: data.get("player1").cloned().unwrap_or_default(),
                 player2: data.get("player2").cloned().unwrap_or_default(),
+                scenario_name: data.get("scenario_name").cloned().unwrap_or_default(),
             });
         }
     }
@@ -498,4 +544,43 @@ async fn cleanup_user_sessions(user_id: &str, redis: &mut impl TypedCommands, so
             }
         }
     }
+}
+
+async fn close_session(State(state): State<AppState>, Path(session_id): Path<String>) -> impl IntoResponse {
+    info!("🗑️ Closing session: {}", session_id);
+
+    let mut redis = state.redis.lock().await;
+
+    let session_key = format!("session:{}", session_id);
+    let user_set_key = format!("session_users:{}", session_id);
+
+    // Get users in the session before deletion
+    let users: HashSet<String> = redis.smembers(&user_set_key).unwrap_or_default();
+
+    // Clean up Redis keys
+    let _ = redis.del(&session_key);
+    let _ = redis.del(&user_set_key);
+
+    // Notify all users still connected
+    let sockets = state.sockets.lock().await;
+
+    let msg = WsServerMessage {
+        payload: Some(ws_server_message::Payload::GameEnded(GameEndedEvent {
+            session_id: session_id.clone(),
+            winner_id: "".to_string(),
+            reason: "Session closed by host".to_string(),
+        })),
+    };
+
+    let mut buf = Vec::new();
+    if msg.encode(&mut buf).is_ok() {
+        for user_id in users {
+            if let Some(tx) = sockets.get(&user_id) {
+                let _ = tx.send(Message::Binary(Bytes::from(buf.clone())));
+                info!("📢 Notified {} about session closure", user_id);
+            }
+        }
+    }
+
+    (StatusCode::OK, "Session closed").into_response()
 }

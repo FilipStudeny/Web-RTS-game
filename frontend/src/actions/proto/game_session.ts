@@ -37,6 +37,7 @@ export interface SessionSummary {
   state: string;
   player1: string;
   player2: string;
+  scenarioName: string;
 }
 
 /** List of sessions */
@@ -327,7 +328,7 @@ export const JoinSessionResponse: MessageFns<JoinSessionResponse> = {
 };
 
 function createBaseSessionSummary(): SessionSummary {
-  return { sessionId: "", scenarioId: "", state: "", player1: "", player2: "" };
+  return { sessionId: "", scenarioId: "", state: "", player1: "", player2: "", scenarioName: "" };
 }
 
 export const SessionSummary: MessageFns<SessionSummary> = {
@@ -346,6 +347,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     }
     if (message.player2 !== "") {
       writer.uint32(42).string(message.player2);
+    }
+    if (message.scenarioName !== "") {
+      writer.uint32(50).string(message.scenarioName);
     }
     return writer;
   },
@@ -397,6 +401,14 @@ export const SessionSummary: MessageFns<SessionSummary> = {
           message.player2 = reader.string();
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.scenarioName = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -413,6 +425,7 @@ export const SessionSummary: MessageFns<SessionSummary> = {
       state: isSet(object.state) ? globalThis.String(object.state) : "",
       player1: isSet(object.player1) ? globalThis.String(object.player1) : "",
       player2: isSet(object.player2) ? globalThis.String(object.player2) : "",
+      scenarioName: isSet(object.scenarioName) ? globalThis.String(object.scenarioName) : "",
     };
   },
 
@@ -433,6 +446,9 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     if (message.player2 !== "") {
       obj.player2 = message.player2;
     }
+    if (message.scenarioName !== "") {
+      obj.scenarioName = message.scenarioName;
+    }
     return obj;
   },
 
@@ -446,6 +462,7 @@ export const SessionSummary: MessageFns<SessionSummary> = {
     message.state = object.state ?? "";
     message.player1 = object.player1 ?? "";
     message.player2 = object.player2 ?? "";
+    message.scenarioName = object.scenarioName ?? "";
     return message;
   },
 };

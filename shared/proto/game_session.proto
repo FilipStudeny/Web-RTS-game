@@ -30,6 +30,7 @@ message SessionSummary {
   string state = 3;
   string player1 = 4;
   string player2 = 5;
+  string scenario_name = 6;
 }
 
 // List of sessions
