@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { Scenario } from "@/actions/proto/create_scenario";
+import { Scenario } from "../proto/scenario";
+
 import { axiosInstance } from "@/integrations/axios/axiosInstance";
 
 export function useGetScenarioById(id: string, options?: { enabled?: boolean }) {

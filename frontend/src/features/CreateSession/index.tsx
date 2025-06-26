@@ -111,7 +111,7 @@ export default function CreateSessionForm({ password, setPassword }: Props) {
 					>
 						<option value="">-- Select Scenario --</option>
 						{scenarioOptions.map((s) => (
-							<option key={s.id} value={s.id}>
+							<option key={s.scenarioId} value={s.scenarioId}>
 								{s.name}
 							</option>
 						))}

@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package scenario;
+
+// --- Position and Geometry ---
+message Position {
+  double lon = 1;
+  double lat = 2;
+}
+
+message Ring {
+  repeated Position points = 1;
+}
+
+// --- Objective ---
+enum ObjectiveState {
+  NEUTRAL = 0;
+  CAPTURING = 1;
+  CAPTURED = 2;
+}
+
+message Objective {
+  optional string id = 1;
+  string letter = 2;
+  ObjectiveState state = 3;
+  Position position = 4;
+}
+
+// --- Unit ---
+enum UnitSide {
+  BLUE = 0;
+  RED = 1;
+}
+
+message Unit {
+  optional string id = 1;
+  Position position = 2;
+  string unit_key = 3;
+  UnitSide side = 4;
+  string icon = 5;
+}
+
+// --- Area ---
+message ScenarioArea {
+  optional string id = 1;
+  string type = 2;
+  repeated Ring coordinates = 3;
+}
+
+// --- Scenario Model ---
+message Scenario {
+  optional string name = 1;
+  repeated Objective objectives = 2;
+  repeated Unit units = 3;
+  repeated ScenarioArea areas = 4;
+}
+
+// --- Scenario API Messages ---
+
+// Create a new scenario
+message CreateScenarioRequest {
+  Scenario scenario = 1;
+}
+
+message CreateScenarioResponse {
+  string scenario_id = 1;
+}
+
+// Get a scenario by ID
+message GetScenarioRequest {
+  string scenario_id = 1;
+}
+
+message GetScenarioResponse {
+  Scenario scenario = 1;
+}
+
+// Summarized scenario listing
+message ScenarioSummary {
+  string scenario_id = 1;
+  string name = 2;
+}
+
+// List of all available scenarios
+message ScenarioList {
+  repeated ScenarioSummary scenarios = 1;
+}

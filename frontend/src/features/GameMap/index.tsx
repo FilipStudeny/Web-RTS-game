@@ -2,7 +2,7 @@ import Feature from "ol/Feature";
 import Map from "ol/Map";
 import View from "ol/View";
 import { ScaleLine } from "ol/control";
-import { Point, Polygon } from "ol/geom";
+import { Point, Polygon, LineString } from "ol/geom";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import { fromLonLat } from "ol/proj";
@@ -17,12 +17,11 @@ import {
 } from "ol/style";
 import { useEffect, useRef } from "react";
 
-import type { Scenario, ScenarioArea, Unit } from "@/actions/proto/create_scenario";
 
 import { OBJECTIVE_STATE_STYLE_MAP } from "@/actions/models/ObjectiveState";
-import { UnitSide } from "@/actions/proto/create_scenario";
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
+import { UnitSide, type Scenario, type ScenarioArea, type Unit } from "@/actions/proto/scenario";
 
 interface GameMapPreviewProps {
 	scenario: Scenario,
@@ -33,6 +32,8 @@ interface GameMapPreviewProps {
 	onAreaSelect?: (area: ScenarioArea)=> void,
 	onMapReady?: (map: Map)=> void,
 	sourceRef?: React.RefObject<VectorSource>,
+	lineSourceRef?: React.RefObject<VectorSource>,
+	selectedUnit?: Unit | null,
 }
 
 export function GameMapPreview({
@@ -44,6 +45,8 @@ export function GameMapPreview({
 	onAreaSelect,
 	onMapReady,
 	sourceRef,
+	lineSourceRef,
+	selectedUnit,
 }: GameMapPreviewProps) {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
@@ -61,8 +64,27 @@ export function GameMapPreview({
 		),
 	);
 
+	const selectedUnitRef = useRef<Unit | null>(null);
+	useEffect(() => {
+		selectedUnitRef.current = selectedUnit ?? null;
+	}, [selectedUnit]);
+
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
+
+		const measureLayer = new VectorLayer({
+			source: sourceRef?.current ?? new VectorSource(),
+			style: new Style({
+				stroke: new Stroke({ color: "#f59e0b", width: 2 }),
+			}),
+		});
+
+		const lineLayer = new VectorLayer({
+			source: lineSourceRef?.current ?? new VectorSource(),
+			style: new Style({
+				stroke: new Stroke({ color: "#38bdf8", width: 2, lineDash: [6, 4] }),
+			}),
+		});
 
 		const mainLayer = new VectorLayer({
 			source: featureSource.current,
@@ -80,7 +102,7 @@ export function GameMapPreview({
 
 				if (type === "objective") {
 					const state =
-            feature.get("state") as keyof typeof OBJECTIVE_STATE_STYLE_MAP;
+						feature.get("state") as keyof typeof OBJECTIVE_STATE_STYLE_MAP;
 					const cfg = OBJECTIVE_STATE_STYLE_MAP[state];
 
 					return new Style({
@@ -101,19 +123,14 @@ export function GameMapPreview({
 			},
 		});
 
-		const measureLayer = new VectorLayer({
-			source: sourceRef?.current ?? new VectorSource(),
-			style: new Style({
-				stroke: new Stroke({
-					color: "#f59e0b",
-					width: 2,
-				}),
-			}),
-		});
-
 		const map = new Map({
 			target: mapRef.current,
-			layers: [new TileLayer({ source: new OSM() }), mainLayer, measureLayer],
+			layers: [
+				new TileLayer({ source: new OSM() }),
+				mainLayer,
+				measureLayer,
+				lineLayer,
+			],
 			view: new View({
 				center: fromLonLat([0, 0]),
 				zoom: 2,
@@ -122,31 +139,53 @@ export function GameMapPreview({
 			interactions: allowInteraction ? undefined : [],
 		});
 
-		map.on("click", (evt) => {
+		const handleClick = (evt) => {
 			const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
 			const type = feature?.get("type");
 
-			selectedFeatureRef.current = feature ?? null;
+			if (feature) {
+				selectedFeatureRef.current = feature;
+
+				if (type === "unit") {
+					const unitKey = feature.get("unitKey");
+					const unit = scenario.units.find((u) => u.unitKey === unitKey);
+					if (unit && onUnitSelect) onUnitSelect(unit);
+				} else if (type !== "objective") {
+					const areaIndex = feature.get("areaIndex");
+					const area = scenario.areas?.[areaIndex];
+					if (area && onAreaSelect) onAreaSelect(area);
+				}
+			} else {
+				selectedFeatureRef.current = null;
+
+				const unit = selectedUnitRef.current;
+				if (unit && unit.position && lineSourceRef?.current) {
+					const from = fromLonLat([unit.position.lon, unit.position.lat]);
+					const to = map.getCoordinateFromPixel(evt.pixel);
+
+					console.log("📏 Drawing line from", unit.unitKey, from, "to", to);
+
+					const lineFeature = new Feature({
+						geometry: new LineString([from, to]),
+					});
+
+					lineSourceRef.current.clear();
+					lineSourceRef.current.addFeature(lineFeature);
+				}
+			}
+
+			// Redraw all layers
 			map.getLayers().forEach((layer) => {
 				if (layer instanceof VectorLayer) layer.changed();
 			});
+		};
 
-			if (type === "unit") {
-				const unitKey = feature?.get("unitKey");
-				const unit = scenario.units.find((u) => u.unitKey === unitKey);
-				if (unit && onUnitSelect) onUnitSelect(unit);
-			}
-
-			if (type !== "unit" && type !== "objective") {
-				const areaIndex = feature?.get("areaIndex");
-				const area = scenario.areas?.[areaIndex];
-				if (area && onAreaSelect) onAreaSelect(area);
-			}
-		});
+		// ✅ Register with OpenLayers
+		map.on("click", handleClick);
 
 		mapInstance.current = map;
 		onMapReady?.(map);
-	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady, sourceRef]);
+	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady, sourceRef, lineSourceRef, selectedUnit]);
 
 	useEffect(() => {
 		if (!mapInstance.current || !scenario) return;
@@ -161,7 +200,7 @@ export function GameMapPreview({
 			);
 			f.set("type", "unit");
 			f.set("unitIcon", u.icon);
-			f.set("side", u.side === UnitSide.ENEMY ? "enemy" : "ally");
+			f.set("side", u.side === UnitSide.BLUE ? "enemy" : "ally");
 			f.set("unitKey", u.unitKey);
 			src.addFeature(f);
 		});

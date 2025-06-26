@@ -15,15 +15,13 @@ import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 // Protos and Types
-import type { Ring, Scenario, ScenarioArea, Unit } from "@/actions/proto/create_scenario";
 
 // Custom Hooks
 import { useCreateScenario } from "@/actions/createScenario";
 import { useGetEditorAreaTypes } from "@/actions/getEditorAreaTypes";
 import { useGetEditorUnitTypes } from "@/actions/getEditorUnitTypes";
-import { type ObjectiveState, OBJECTIVE_STATE_STYLE_MAP } from "@/actions/models/ObjectiveState";
-import { ObjectiveState as ProtoObjectiveState, UnitSide } from "@/actions/proto/create_scenario";
-import { UnitTypeKey } from "@/actions/proto/unit_Types";
+import { OBJECTIVE_STATE_STYLE_MAP, type ObjectiveStateConfig } from "@/actions/models/ObjectiveState";
+import { CreateScenarioRequest, ObjectiveState, Ring, ScenarioArea, UnitSide, type Unit } from "@/actions/proto/scenario";
 // UI Components
 import { AreaInfoPanel } from "@/features/AreaInfoPanel";
 import EditorSidebar from "@/features/EditorSidebar";
@@ -33,6 +31,7 @@ import { useLoadingMessages } from "@/integrations/hooks/useLoadingMessages";
 // Utilities
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
+import { UnitTypeKey } from "@/actions/proto/unit_types";
 
 type DrawMode = string | null;
 
@@ -132,7 +131,7 @@ export default function ScenarioEditor() {
 				}
 
 				if (type === "objective") {
-					const state = feature.get("state") as ObjectiveState;
+					const state = feature.get("state") as ObjectiveStateConfig;
 					const styleConfig = OBJECTIVE_STATE_STYLE_MAP[state];
 
 					return new Style({
@@ -267,7 +266,7 @@ export default function ScenarioEditor() {
 		setCanCreateScenario(allyCount >= 1 && enemyCount >= 1);
 	};
 
-	const buildScenarioData = (): Scenario => {
+	const buildScenarioData = (): CreateScenarioRequest => {
 		const features = featureSourceRef.current.getFeatures();
 
 		const units: Unit[] = features
@@ -278,7 +277,7 @@ export default function ScenarioEditor() {
 				return {
 					position: { lon: coords[0], lat: coords[1] },
 					unitKey: f.get("unitKey") ?? "UNIT_TYPE_UNSPECIFIED",
-					side: f.get("side") === "enemy" ? UnitSide.ENEMY : UnitSide.ALLY,
+					side: f.get("side") === "enemy" ? UnitSide.RED : UnitSide.BLUE,
 					icon: f.get("unitIcon") ?? "default",
 				};
 			});
@@ -306,25 +305,26 @@ export default function ScenarioEditor() {
 				return [{ type, coordinates: rings }];
 			});
 
-		const scenario: Scenario = {
-			name: scenarioTitle,
-			objectives: objectives.map(obj => ({
-				letter: obj.letter,
-				state:
-					obj.state === "capturing"
-						? ProtoObjectiveState.CAPTURING
-						: obj.state === "captured"
-							? ProtoObjectiveState.CAPTURED
-							: ProtoObjectiveState.NEUTRAL,
-				position: { lon: obj.position[0], lat: obj.position[1] },
-			})),
-			units,
-			areas,
+		const createScenarioRequest: CreateScenarioRequest = {
+			scenario: {
+				name: scenarioTitle,
+				objectives: objectives.map(obj => ({
+					letter: obj.letter,
+					state:
+						obj.state === "capturing"
+							? ObjectiveState.CAPTURING
+							: obj.state === "captured"
+								? ObjectiveState.CAPTURED
+								: ObjectiveState.NEUTRAL,
+					position: { lon: obj.position[0], lat: obj.position[1] },
+				})),
+				units,
+				areas,
+			},
+
 		};
 
-		console.log("Scenario created:", scenario);
-
-		return scenario;
+		return createScenarioRequest;
 	};
 
 	const handleCreateScenario = () => {

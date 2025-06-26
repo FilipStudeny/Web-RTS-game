@@ -30,7 +30,7 @@ function RouteComponent() {
 	const { data: scenario, isLoading: isScenarioLoading, error: scenarioError } = useGetScenarioById(session?.scenarioId ?? "");
 	const { data: unitTypes, isLoading: isLoadingUnitType } = useGetEditorUnitTypes();
 	const { data: areaTypes, isLoading: isLoadingAreaTypes } = useGetEditorAreaTypes();
-
+	const lineSourceRef = useRef<VectorSource>(new VectorSource());
 	const measureSourceRef = useRef<VectorSource>(new VectorSource());
 	const [chatOpen, setChatOpen] = useState(false);
 	const [showMeasurePanel, setShowMeasurePanel] = useState(false);
@@ -98,6 +98,8 @@ function RouteComponent() {
 					onAreaSelect={setSelectedArea}
 					onMapReady={setMapInstance}
 					sourceRef={measureSourceRef}
+					lineSourceRef={lineSourceRef}
+					selectedUnit={selectedUnit} // ✅ THIS WAS MISSING
 					className="absolute inset-0 z-0"
 				/>
 

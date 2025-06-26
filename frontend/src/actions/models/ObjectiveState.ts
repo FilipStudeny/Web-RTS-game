@@ -1,6 +1,6 @@
-export type ObjectiveState = "neutral" | "capturing" | "captured";
+export type ObjectiveStateConfig = "neutral" | "capturing" | "captured";
 
-export const OBJECTIVE_STATE_STYLE_MAP: Record<ObjectiveState, {
+export const OBJECTIVE_STATE_STYLE_MAP: Record<ObjectiveStateConfig, {
 	fill: string,
 	stroke: string,
 	text: string,

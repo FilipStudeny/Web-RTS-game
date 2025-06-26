@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { ScenarioList } from "../proto/summary_scenario";
+import { ScenarioList } from "../proto/scenario";
 
 import { axiosInstance } from "@/integrations/axios/axiosInstance";
 

@@ -40,7 +40,7 @@ pub async fn get_scenarios(
                     .unwrap_or("Unnamed")
                     .to_string();
 
-                summaries.push(ScenarioSummary { id, name });
+                summaries.push(ScenarioSummary { scenario_id: id, name });
             }
             Err(e) => {
                 return (

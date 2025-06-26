@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { UnitTypeList } from "@/actions/proto/unit_Types";
+import { UnitTypeList } from "../proto/unit_types";
+
 import { axiosInstance } from "@/integrations/axios/axiosInstance";
 
 export function useGetEditorUnitTypes() {
