@@ -101,6 +101,7 @@ function RouteComponent() {
 					lineSourceRef={lineSourceRef}
 					selectedUnit={selectedUnit}
 					className="absolute inset-0 z-0"
+					sessionId={sessionId}
 				/>
 
 				<ResourcesPanel

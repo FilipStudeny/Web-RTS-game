@@ -51,6 +51,7 @@ message SessionReadyEvent {
 message WsClientMessage {
   oneof payload {
     string ping = 1;
+    MoveUnitRequest move_unit = 2;
   }
 }
 
@@ -70,5 +71,20 @@ message WsServerMessage {
     SessionReadyEvent session_ready = 1;
     GameStartedEvent game_started = 2;
     GameEndedEvent game_ended = 3;
+    MoveUnitBroadcast unit_moved = 4;
   }
+}
+
+message MoveUnitRequest {
+  string session_id = 1;
+  string unit_id = 2;
+  double target_lat = 3;
+  double target_lon = 4;
+}
+
+message MoveUnitBroadcast {
+  string session_id = 1;
+  string unit_id = 2;
+  double target_lat = 3;
+  double target_lon = 4;
 }

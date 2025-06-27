@@ -1,6 +1,7 @@
 use redis::TypedCommands;
 mod models;
 mod routes;
+mod utils;
 
 use std::{fs, net::SocketAddr, path::Path as FsPath, sync::Arc};
 use std::collections::{HashMap, HashSet};
@@ -37,7 +38,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::log::warn;
 use routes::get_unit_types::get_unit_types;
-use crate::models::proto::{ws_server_message, GameEndedEvent, GameStartedEvent, JoinSessionRequest, JoinSessionResponse, SessionList, SessionReadyEvent, StartSessionRequest, StartSessionResponse, WsServerMessage};
+use crate::models::proto::{ws_client_message, ws_server_message, GameEndedEvent, GameStartedEvent, JoinSessionRequest, JoinSessionResponse, MoveUnitBroadcast, MoveUnitRequest, SessionList, SessionReadyEvent, StartSessionRequest, StartSessionResponse, WsClientMessage, WsServerMessage};
+use crate::utils::{get_unit_position_from_mongo, haversine_distance, interpolate};
 
 #[derive(Deserialize)]
 struct StartSessionInput {
@@ -158,21 +160,32 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     info!("Assigned ID: {}", user_id);
 
-    // Handle incoming messages (e.g., pings)
     while let Some(Ok(msg)) = receiver.next().await {
         match msg {
-            Message::Text(_) => {
-                // No TTL update needed
+            Message::Binary(bytes) => {
+                match WsClientMessage::decode(&*bytes) {
+                    Ok(client_msg) => {
+                        if let Some(payload) = client_msg.payload {
+                            match payload {
+                                ws_client_message::Payload::MoveUnit(req) => {
+                                    handle_move_unit(&state, req).await;
+                                }
+                                _ => {
+                                    warn!("Unhandled WsClientMessage payload");
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("❌ Failed to decode WsClientMessage: {}", e);
+                    }
+                }
             }
-            Message::Ping(_) | Message::Pong(_) => {
-                //  pings/pongs
-            }
-            Message::Close(_) => {
-                break;
-            }
+            Message::Close(_) => break,
             _ => {}
         }
     }
+
 
     // Cleanup on disconnect
     state.sockets.lock().await.remove(&user_id);
@@ -662,4 +675,97 @@ async fn get_session_by_id(
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/protobuf".parse().unwrap());
     (headers, Bytes::from(buf)).into_response()
+}
+
+async fn handle_move_unit(state: &AppState, req: MoveUnitRequest) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        perform_unit_movement(state, req).await;
+    });
+}
+async fn perform_unit_movement(state: AppState, req: MoveUnitRequest) {
+    use crate::models::proto::ws_server_message;
+    use tokio::time::{sleep, Duration};
+
+    let redis_key = format!("unit_pos:{}:{}", req.session_id, req.unit_id);
+
+    // 1. Load current position
+    let (start_lat, start_lon) = {
+        let mut redis = state.redis.lock().await;
+
+        let pos_map: HashMap<String, String> = redis.hgetall(&redis_key).unwrap_or_default();
+        match (pos_map.get("lat"), pos_map.get("lon")) {
+            (Some(lat_str), Some(lon_str)) => {
+                let lat = lat_str.parse::<f64>().unwrap_or(req.target_lat);
+                let lon = lon_str.parse::<f64>().unwrap_or(req.target_lon);
+                (lat, lon)
+            }
+            _ => {
+                warn!("🔁 Redis missing unit position for {}, using fallback", req.unit_id);
+                match get_unit_position_from_mongo(&state.db, &req.unit_id).await {
+                    Some((lat, lon)) => {
+                        let _ = redis.hset_multiple(&redis_key, &[("lat", lat), ("lon", lon)]);
+                        (lat, lon)
+                    }
+                    None => (req.target_lat, req.target_lon),
+                }
+            }
+        }
+    };
+
+    // 2. Get unit speed
+    let unit_types: Vec<serde_json::Value> =
+        crate::load_configs_from_file(std::path::Path::new("../shared/configs/units-config.json"))
+            .unwrap_or_default();
+
+    let speed = unit_types
+        .iter()
+        .find(|t| t.get("icon").unwrap_or(&serde_json::Value::Null).as_str() == Some(&req.unit_id))
+        .and_then(|t| t.get("movement_speed").and_then(|s| s.as_f64()))
+        .unwrap_or(1.0);
+
+    // 3. Interpolate over time
+    let distance_km = haversine_distance(start_lat, start_lon, req.target_lat, req.target_lon);
+    let duration_secs = distance_km / speed.max(0.01);
+    let steps = (duration_secs * 10.0).ceil() as usize;
+
+    if steps == 0 {
+        return;
+    }
+
+    for step in 1..=steps {
+        let t = step as f64 / steps as f64;
+        let lat = interpolate(start_lat, req.target_lat, t);
+        let lon = interpolate(start_lon, req.target_lon, t);
+
+        let msg = WsServerMessage {
+            payload: Some(ws_server_message::Payload::UnitMoved(MoveUnitBroadcast {
+                session_id: req.session_id.clone(),
+                unit_id: req.unit_id.clone(),
+                target_lat: lat,
+                target_lon: lon,
+            })),
+        };
+
+        let mut buf = Vec::new();
+        if msg.encode(&mut buf).is_ok() {
+            let users: HashSet<String> = {
+                let mut redis = state.redis.lock().await;
+                redis.smembers(format!("session_users:{}", req.session_id)).unwrap_or_default()
+            };
+
+            let sockets = state.sockets.lock().await;
+            for user_id in users {
+                if let Some(tx) = sockets.get(&user_id) {
+                    let _ = tx.send(Message::Binary(Bytes::from(buf.clone())));
+                }
+            }
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // 4. Save final position
+    let mut redis = state.redis.lock().await;
+    let _ = redis.hset_multiple(&redis_key, &[("lat", req.target_lat), ("lon", req.target_lon)]);
 }

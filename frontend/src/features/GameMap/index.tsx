@@ -5,7 +5,7 @@ import { ScaleLine } from "ol/control";
 import { Point, Polygon, LineString } from "ol/geom";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
-import { fromLonLat } from "ol/proj";
+import { fromLonLat, toLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import VectorSource from "ol/source/Vector";
 import {
@@ -18,7 +18,9 @@ import {
 import { useEffect, useRef } from "react";
 
 import { OBJECTIVE_STATE_STYLE_MAP } from "@/actions/models/ObjectiveState";
+import { WsClientMessage, type MoveUnitRequest } from "@/actions/proto/game_session";
 import { UnitSide, type Scenario, type ScenarioArea, type Unit } from "@/actions/proto/scenario";
+import { useSocketStore } from "@/integrations/stores/useSocketStore";
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
 
@@ -33,6 +35,7 @@ interface GameMapPreviewProps {
 	sourceRef?: React.RefObject<VectorSource>,
 	lineSourceRef?: React.RefObject<VectorSource>,
 	selectedUnit?: Unit | null,
+	sessionId: string,
 }
 
 export function GameMapPreview({
@@ -46,13 +49,14 @@ export function GameMapPreview({
 	sourceRef,
 	lineSourceRef,
 	selectedUnit,
+	sessionId,
 }: GameMapPreviewProps) {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
 	const featureSource = useRef(new VectorSource());
 	const selectedFeatureRef = useRef<any>(null);
 	const selectedUnitRef = useRef<Unit | null>(null);
-
+	const movedUnits = useSocketStore((s) => s.movedUnits);
 	const getAreaStyle = useRef(
 		createAreaStyleFactory(
 			areaTypes.map((a) => ({
@@ -68,6 +72,24 @@ export function GameMapPreview({
 	useEffect(() => {
 		selectedUnitRef.current = selectedUnit ?? null;
 	}, [selectedUnit]);
+
+	useEffect(() => {
+		if (!mapInstance.current) return;
+
+		for (const [unitId, { lat, lon }] of Object.entries(movedUnits)) {
+			const feature = featureSource.current
+				.getFeatures()
+				.find((f) => f.get("unitId") === unitId);
+
+			if (feature) {
+				const geometry = feature.getGeometry();
+				if (geometry instanceof Point) {
+					geometry.setCoordinates(fromLonLat([lon, lat]));
+					feature.changed();
+				}
+			}
+		}
+	}, [movedUnits]);
 
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
@@ -139,23 +161,44 @@ export function GameMapPreview({
 			interactions: allowInteraction ? undefined : [],
 		});
 
+		// 🎯 Click handling
 		const handleClick = (evt) => {
 			const unit = selectedUnitRef.current;
 
-			// If a unit is selected → draw line and clear selection
+			// 🧭 Moving unit if selected
 			if (unit && unit.position && lineSourceRef?.current) {
 				const from = fromLonLat([unit.position.lon, unit.position.lat]);
 				const to = map.getCoordinateFromPixel(evt.pixel);
+				const [lon, lat] = toLonLat(to);
 
+				// Draw movement line
 				const lineFeature = new Feature({
 					geometry: new LineString([from, to]),
 				});
-
-				selectedFeatureRef.current = null;
 				lineSourceRef.current.clear();
 				lineSourceRef.current.addFeature(lineFeature);
 
-				// Clear selected unit after drawing
+				// ✉️ Send MoveUnitRequest
+				const socket = useSocketStore.getState().socket;
+				if (socket) {
+					if (!sessionId || !unit.id) return;
+					const moveReq: MoveUnitRequest = {
+						sessionId,
+						unitId: unit.id,
+						targetLat: lat,
+						targetLon: lon,
+					};
+
+					const message: WsClientMessage = {
+						moveUnit: moveReq,
+					};
+
+					const encoded = WsClientMessage.encode(message).finish();
+					socket.send(encoded);
+				}
+
+				// Clear selection
+				selectedFeatureRef.current = null;
 				selectedUnitRef.current = null;
 				onUnitSelect?.(null);
 
@@ -166,7 +209,7 @@ export function GameMapPreview({
 				return;
 			}
 
-			// Normal selection if no unit is selected
+			// Normal selection
 			const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
 			const type = feature?.get("type");
 
@@ -200,8 +243,16 @@ export function GameMapPreview({
 		map.on("click", handleClick);
 		mapInstance.current = map;
 		onMapReady?.(map);
-	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady, sourceRef, lineSourceRef]);
-
+	}, [
+		allowInteraction,
+		scenario,
+		areaTypes,
+		onUnitSelect,
+		onAreaSelect,
+		onMapReady,
+		sourceRef,
+		lineSourceRef,
+	]);
 	useEffect(() => {
 		if (!mapInstance.current || !scenario) return;
 

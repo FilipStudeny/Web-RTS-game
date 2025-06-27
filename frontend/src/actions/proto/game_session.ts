@@ -54,6 +54,7 @@ export interface SessionReadyEvent {
 /** WebSocket envelope for incoming client -> server messages (optional) */
 export interface WsClientMessage {
   ping?: string | undefined;
+  moveUnit?: MoveUnitRequest | undefined;
 }
 
 /** Sent when the creator starts the game */
@@ -72,6 +73,21 @@ export interface WsServerMessage {
   sessionReady?: SessionReadyEvent | undefined;
   gameStarted?: GameStartedEvent | undefined;
   gameEnded?: GameEndedEvent | undefined;
+  unitMoved?: MoveUnitBroadcast | undefined;
+}
+
+export interface MoveUnitRequest {
+  sessionId: string;
+  unitId: string;
+  targetLat: number;
+  targetLon: number;
+}
+
+export interface MoveUnitBroadcast {
+  sessionId: string;
+  unitId: string;
+  targetLat: number;
+  targetLon: number;
 }
 
 function createBaseStartSessionRequest(): StartSessionRequest {
@@ -606,13 +622,16 @@ export const SessionReadyEvent: MessageFns<SessionReadyEvent> = {
 };
 
 function createBaseWsClientMessage(): WsClientMessage {
-  return { ping: undefined };
+  return { ping: undefined, moveUnit: undefined };
 }
 
 export const WsClientMessage: MessageFns<WsClientMessage> = {
   encode(message: WsClientMessage, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.ping !== undefined) {
       writer.uint32(10).string(message.ping);
+    }
+    if (message.moveUnit !== undefined) {
+      MoveUnitRequest.encode(message.moveUnit, writer.uint32(18).fork()).join();
     }
     return writer;
   },
@@ -632,6 +651,14 @@ export const WsClientMessage: MessageFns<WsClientMessage> = {
           message.ping = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.moveUnit = MoveUnitRequest.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -642,13 +669,19 @@ export const WsClientMessage: MessageFns<WsClientMessage> = {
   },
 
   fromJSON(object: any): WsClientMessage {
-    return { ping: isSet(object.ping) ? globalThis.String(object.ping) : undefined };
+    return {
+      ping: isSet(object.ping) ? globalThis.String(object.ping) : undefined,
+      moveUnit: isSet(object.moveUnit) ? MoveUnitRequest.fromJSON(object.moveUnit) : undefined,
+    };
   },
 
   toJSON(message: WsClientMessage): unknown {
     const obj: any = {};
     if (message.ping !== undefined) {
       obj.ping = message.ping;
+    }
+    if (message.moveUnit !== undefined) {
+      obj.moveUnit = MoveUnitRequest.toJSON(message.moveUnit);
     }
     return obj;
   },
@@ -659,6 +692,9 @@ export const WsClientMessage: MessageFns<WsClientMessage> = {
   fromPartial<I extends Exact<DeepPartial<WsClientMessage>, I>>(object: I): WsClientMessage {
     const message = createBaseWsClientMessage();
     message.ping = object.ping ?? undefined;
+    message.moveUnit = (object.moveUnit !== undefined && object.moveUnit !== null)
+      ? MoveUnitRequest.fromPartial(object.moveUnit)
+      : undefined;
     return message;
   },
 };
@@ -814,7 +850,7 @@ export const GameEndedEvent: MessageFns<GameEndedEvent> = {
 };
 
 function createBaseWsServerMessage(): WsServerMessage {
-  return { sessionReady: undefined, gameStarted: undefined, gameEnded: undefined };
+  return { sessionReady: undefined, gameStarted: undefined, gameEnded: undefined, unitMoved: undefined };
 }
 
 export const WsServerMessage: MessageFns<WsServerMessage> = {
@@ -827,6 +863,9 @@ export const WsServerMessage: MessageFns<WsServerMessage> = {
     }
     if (message.gameEnded !== undefined) {
       GameEndedEvent.encode(message.gameEnded, writer.uint32(26).fork()).join();
+    }
+    if (message.unitMoved !== undefined) {
+      MoveUnitBroadcast.encode(message.unitMoved, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -862,6 +901,14 @@ export const WsServerMessage: MessageFns<WsServerMessage> = {
           message.gameEnded = GameEndedEvent.decode(reader, reader.uint32());
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.unitMoved = MoveUnitBroadcast.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -876,6 +923,7 @@ export const WsServerMessage: MessageFns<WsServerMessage> = {
       sessionReady: isSet(object.sessionReady) ? SessionReadyEvent.fromJSON(object.sessionReady) : undefined,
       gameStarted: isSet(object.gameStarted) ? GameStartedEvent.fromJSON(object.gameStarted) : undefined,
       gameEnded: isSet(object.gameEnded) ? GameEndedEvent.fromJSON(object.gameEnded) : undefined,
+      unitMoved: isSet(object.unitMoved) ? MoveUnitBroadcast.fromJSON(object.unitMoved) : undefined,
     };
   },
 
@@ -889,6 +937,9 @@ export const WsServerMessage: MessageFns<WsServerMessage> = {
     }
     if (message.gameEnded !== undefined) {
       obj.gameEnded = GameEndedEvent.toJSON(message.gameEnded);
+    }
+    if (message.unitMoved !== undefined) {
+      obj.unitMoved = MoveUnitBroadcast.toJSON(message.unitMoved);
     }
     return obj;
   },
@@ -907,6 +958,225 @@ export const WsServerMessage: MessageFns<WsServerMessage> = {
     message.gameEnded = (object.gameEnded !== undefined && object.gameEnded !== null)
       ? GameEndedEvent.fromPartial(object.gameEnded)
       : undefined;
+    message.unitMoved = (object.unitMoved !== undefined && object.unitMoved !== null)
+      ? MoveUnitBroadcast.fromPartial(object.unitMoved)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseMoveUnitRequest(): MoveUnitRequest {
+  return { sessionId: "", unitId: "", targetLat: 0, targetLon: 0 };
+}
+
+export const MoveUnitRequest: MessageFns<MoveUnitRequest> = {
+  encode(message: MoveUnitRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.unitId !== "") {
+      writer.uint32(18).string(message.unitId);
+    }
+    if (message.targetLat !== 0) {
+      writer.uint32(25).double(message.targetLat);
+    }
+    if (message.targetLon !== 0) {
+      writer.uint32(33).double(message.targetLon);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): MoveUnitRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMoveUnitRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.unitId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 25) {
+            break;
+          }
+
+          message.targetLat = reader.double();
+          continue;
+        }
+        case 4: {
+          if (tag !== 33) {
+            break;
+          }
+
+          message.targetLon = reader.double();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): MoveUnitRequest {
+    return {
+      sessionId: isSet(object.sessionId) ? globalThis.String(object.sessionId) : "",
+      unitId: isSet(object.unitId) ? globalThis.String(object.unitId) : "",
+      targetLat: isSet(object.targetLat) ? globalThis.Number(object.targetLat) : 0,
+      targetLon: isSet(object.targetLon) ? globalThis.Number(object.targetLon) : 0,
+    };
+  },
+
+  toJSON(message: MoveUnitRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.unitId !== "") {
+      obj.unitId = message.unitId;
+    }
+    if (message.targetLat !== 0) {
+      obj.targetLat = message.targetLat;
+    }
+    if (message.targetLon !== 0) {
+      obj.targetLon = message.targetLon;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MoveUnitRequest>, I>>(base?: I): MoveUnitRequest {
+    return MoveUnitRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<MoveUnitRequest>, I>>(object: I): MoveUnitRequest {
+    const message = createBaseMoveUnitRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.unitId = object.unitId ?? "";
+    message.targetLat = object.targetLat ?? 0;
+    message.targetLon = object.targetLon ?? 0;
+    return message;
+  },
+};
+
+function createBaseMoveUnitBroadcast(): MoveUnitBroadcast {
+  return { sessionId: "", unitId: "", targetLat: 0, targetLon: 0 };
+}
+
+export const MoveUnitBroadcast: MessageFns<MoveUnitBroadcast> = {
+  encode(message: MoveUnitBroadcast, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.unitId !== "") {
+      writer.uint32(18).string(message.unitId);
+    }
+    if (message.targetLat !== 0) {
+      writer.uint32(25).double(message.targetLat);
+    }
+    if (message.targetLon !== 0) {
+      writer.uint32(33).double(message.targetLon);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): MoveUnitBroadcast {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMoveUnitBroadcast();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.unitId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 25) {
+            break;
+          }
+
+          message.targetLat = reader.double();
+          continue;
+        }
+        case 4: {
+          if (tag !== 33) {
+            break;
+          }
+
+          message.targetLon = reader.double();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): MoveUnitBroadcast {
+    return {
+      sessionId: isSet(object.sessionId) ? globalThis.String(object.sessionId) : "",
+      unitId: isSet(object.unitId) ? globalThis.String(object.unitId) : "",
+      targetLat: isSet(object.targetLat) ? globalThis.Number(object.targetLat) : 0,
+      targetLon: isSet(object.targetLon) ? globalThis.Number(object.targetLon) : 0,
+    };
+  },
+
+  toJSON(message: MoveUnitBroadcast): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.unitId !== "") {
+      obj.unitId = message.unitId;
+    }
+    if (message.targetLat !== 0) {
+      obj.targetLat = message.targetLat;
+    }
+    if (message.targetLon !== 0) {
+      obj.targetLon = message.targetLon;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MoveUnitBroadcast>, I>>(base?: I): MoveUnitBroadcast {
+    return MoveUnitBroadcast.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<MoveUnitBroadcast>, I>>(object: I): MoveUnitBroadcast {
+    const message = createBaseMoveUnitBroadcast();
+    message.sessionId = object.sessionId ?? "";
+    message.unitId = object.unitId ?? "";
+    message.targetLat = object.targetLat ?? 0;
+    message.targetLon = object.targetLon ?? 0;
     return message;
   },
 };

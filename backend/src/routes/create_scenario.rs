@@ -1,3 +1,4 @@
+use crate::models::proto::{CreateScenarioRequest, CreateScenarioResponse};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -8,7 +9,6 @@ use uuid::Uuid;
 
 use crate::AppState;
 use prost::Message;
-use crate::models::proto::{CreateScenarioRequest, CreateScenarioResponse};
 
 pub async fn create_scenario(
     State(state): State<AppState>,
