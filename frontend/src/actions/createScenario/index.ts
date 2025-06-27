@@ -1,6 +1,7 @@
+import { BinaryReader } from "@bufbuild/protobuf/wire";
 import { useMutation } from "@tanstack/react-query";
 
-import { CreateScenarioRequest } from "../proto/scenario";
+import { CreateScenarioRequest, CreateScenarioResponse } from "../proto/scenario";
 
 import { axiosInstance } from "@/integrations/axios/axiosInstance";
 
@@ -13,10 +14,12 @@ export function useCreateScenario() {
 				headers: {
 					"Content-Type": "application/protobuf",
 				},
-				responseType: "text",
+				responseType: "arraybuffer",
 			});
 
-			return res.data;
+			const reader = new BinaryReader(new Uint8Array(res.data));
+
+			return CreateScenarioResponse.decode(reader);
 		},
 	});
 }

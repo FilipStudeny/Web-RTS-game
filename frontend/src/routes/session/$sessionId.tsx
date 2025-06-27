@@ -2,13 +2,13 @@ import { createFileRoute, useParams } from "@tanstack/react-router";
 import VectorSource from "ol/source/Vector";
 import { useRef, useState } from "react";
 
-import type { Scenario, ScenarioArea, Unit } from "@/actions/proto/create_scenario";
+import type { Scenario, ScenarioArea, Unit } from "@/actions/proto/scenario";
+import type { UnitTypeKey } from "@/actions/proto/unit_types";
 import type { Map } from "ol";
 
 import { useGetEditorAreaTypes } from "@/actions/getEditorAreaTypes";
 import { useGetEditorUnitTypes } from "@/actions/getEditorUnitTypes";
 import { useGetScenarioById } from "@/actions/getScenarioById";
-import { UnitTypeKey } from "@/actions/proto/unit_Types";
 import { useDisconnectUser } from "@/actions/sessions/disconnectPlayer";
 import { useGetSessionById } from "@/actions/sessions/getSessionById";
 import { AreaInfoPanel } from "@/features/AreaInfoPanel";
@@ -99,7 +99,7 @@ function RouteComponent() {
 					onMapReady={setMapInstance}
 					sourceRef={measureSourceRef}
 					lineSourceRef={lineSourceRef}
-					selectedUnit={selectedUnit} // ✅ THIS WAS MISSING
+					selectedUnit={selectedUnit}
 					className="absolute inset-0 z-0"
 				/>
 

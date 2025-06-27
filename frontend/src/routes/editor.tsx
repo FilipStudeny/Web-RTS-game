@@ -23,6 +23,7 @@ import { useGetEditorUnitTypes } from "@/actions/getEditorUnitTypes";
 import { OBJECTIVE_STATE_STYLE_MAP, type ObjectiveStateConfig } from "@/actions/models/ObjectiveState";
 import { CreateScenarioRequest, ObjectiveState, Ring, ScenarioArea, UnitSide, type Unit } from "@/actions/proto/scenario";
 // UI Components
+import { UnitTypeKey } from "@/actions/proto/unit_types";
 import { AreaInfoPanel } from "@/features/AreaInfoPanel";
 import EditorSidebar from "@/features/EditorSidebar";
 import { ObjectiveBar, type Objective } from "@/features/ObjectiveBar";
@@ -31,7 +32,6 @@ import { useLoadingMessages } from "@/integrations/hooks/useLoadingMessages";
 // Utilities
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
-import { UnitTypeKey } from "@/actions/proto/unit_types";
 
 type DrawMode = string | null;
 

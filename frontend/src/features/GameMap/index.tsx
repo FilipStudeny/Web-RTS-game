@@ -17,11 +17,10 @@ import {
 } from "ol/style";
 import { useEffect, useRef } from "react";
 
-
 import { OBJECTIVE_STATE_STYLE_MAP } from "@/actions/models/ObjectiveState";
+import { UnitSide, type Scenario, type ScenarioArea, type Unit } from "@/actions/proto/scenario";
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
-import { UnitSide, type Scenario, type ScenarioArea, type Unit } from "@/actions/proto/scenario";
 
 interface GameMapPreviewProps {
 	scenario: Scenario,
@@ -52,6 +51,7 @@ export function GameMapPreview({
 	const mapInstance = useRef<Map | null>(null);
 	const featureSource = useRef(new VectorSource());
 	const selectedFeatureRef = useRef<any>(null);
+	const selectedUnitRef = useRef<Unit | null>(null);
 
 	const getAreaStyle = useRef(
 		createAreaStyleFactory(
@@ -64,7 +64,7 @@ export function GameMapPreview({
 		),
 	);
 
-	const selectedUnitRef = useRef<Unit | null>(null);
+	// selectedUnitRef in sync with prop
 	useEffect(() => {
 		selectedUnitRef.current = selectedUnit ?? null;
 	}, [selectedUnit]);
@@ -140,6 +140,33 @@ export function GameMapPreview({
 		});
 
 		const handleClick = (evt) => {
+			const unit = selectedUnitRef.current;
+
+			// If a unit is selected → draw line and clear selection
+			if (unit && unit.position && lineSourceRef?.current) {
+				const from = fromLonLat([unit.position.lon, unit.position.lat]);
+				const to = map.getCoordinateFromPixel(evt.pixel);
+
+				const lineFeature = new Feature({
+					geometry: new LineString([from, to]),
+				});
+
+				selectedFeatureRef.current = null;
+				lineSourceRef.current.clear();
+				lineSourceRef.current.addFeature(lineFeature);
+
+				// Clear selected unit after drawing
+				selectedUnitRef.current = null;
+				onUnitSelect?.(null);
+
+				map.getLayers().forEach((layer) => {
+					if (layer instanceof VectorLayer) layer.changed();
+				});
+
+				return;
+			}
+
+			// Normal selection if no unit is selected
 			const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
 			const type = feature?.get("type");
 
@@ -147,45 +174,33 @@ export function GameMapPreview({
 				selectedFeatureRef.current = feature;
 
 				if (type === "unit") {
-					const unitKey = feature.get("unitKey");
-					const unit = scenario.units.find((u) => u.unitKey === unitKey);
-					if (unit && onUnitSelect) onUnitSelect(unit);
-				} else if (type !== "objective") {
-					const areaIndex = feature.get("areaIndex");
-					const area = scenario.areas?.[areaIndex];
-					if (area && onAreaSelect) onAreaSelect(area);
+					const unitId = feature.get("unitId");
+					const unit = scenario.units.find((u) => u.id === unitId);
+					if (unit) {
+						selectedUnitRef.current = unit;
+						lineSourceRef?.current?.clear();
+						onUnitSelect?.(unit);
+					}
+				} else if (type === "area") {
+					const areaId = feature.get("areaId");
+					const area = scenario.areas?.find((a) => a.id === areaId);
+					if (area) {
+						onAreaSelect?.(area);
+					}
 				}
 			} else {
 				selectedFeatureRef.current = null;
-
-				const unit = selectedUnitRef.current;
-				if (unit && unit.position && lineSourceRef?.current) {
-					const from = fromLonLat([unit.position.lon, unit.position.lat]);
-					const to = map.getCoordinateFromPixel(evt.pixel);
-
-					console.log("📏 Drawing line from", unit.unitKey, from, "to", to);
-
-					const lineFeature = new Feature({
-						geometry: new LineString([from, to]),
-					});
-
-					lineSourceRef.current.clear();
-					lineSourceRef.current.addFeature(lineFeature);
-				}
 			}
 
-			// Redraw all layers
 			map.getLayers().forEach((layer) => {
 				if (layer instanceof VectorLayer) layer.changed();
 			});
 		};
 
-		// ✅ Register with OpenLayers
 		map.on("click", handleClick);
-
 		mapInstance.current = map;
 		onMapReady?.(map);
-	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady, sourceRef, lineSourceRef, selectedUnit]);
+	}, [allowInteraction, scenario, areaTypes, onUnitSelect, onAreaSelect, onMapReady, sourceRef, lineSourceRef]);
 
 	useEffect(() => {
 		if (!mapInstance.current || !scenario) return;
@@ -199,9 +214,9 @@ export function GameMapPreview({
 				new Point(fromLonLat([u.position.lon, u.position.lat])),
 			);
 			f.set("type", "unit");
+			f.set("unitId", u.id);
 			f.set("unitIcon", u.icon);
 			f.set("side", u.side === UnitSide.BLUE ? "enemy" : "ally");
-			f.set("unitKey", u.unitKey);
 			src.addFeature(f);
 		});
 
@@ -216,7 +231,7 @@ export function GameMapPreview({
 			src.addFeature(f);
 		});
 
-		scenario.areas?.forEach((area, index) => {
+		scenario.areas?.forEach((area) => {
 			area.coordinates.forEach((ring) => {
 				const coords = ring.points.map((p) => fromLonLat([p.lon, p.lat]));
 				if (coords.length >= 2) {
@@ -227,7 +242,7 @@ export function GameMapPreview({
 
 				const poly = new Feature(new Polygon([coords]));
 				poly.set("type", area.type.toLowerCase());
-				poly.set("areaIndex", index);
+				poly.set("areaId", area.id);
 				featureSource.current.addFeature(poly);
 			});
 		});
