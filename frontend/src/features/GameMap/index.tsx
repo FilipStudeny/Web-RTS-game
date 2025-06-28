@@ -18,9 +18,10 @@ import {
 import { useEffect, useRef } from "react";
 
 import { OBJECTIVE_STATE_STYLE_MAP } from "@/actions/models/ObjectiveState";
-import { WsClientMessage, type MoveUnitRequest } from "@/actions/proto/game_session";
-import { UnitSide, type Scenario, type ScenarioArea, type Unit } from "@/actions/proto/scenario";
+import { SessionSummary, WsClientMessage, type MoveUnitRequest } from "@/actions/proto/game_session";
+import { type Scenario, type ScenarioArea, type Unit } from "@/actions/proto/scenario";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
+import { canControlUnit } from "@/utils/canControlUnits";
 import { createAreaStyleFactory } from "@/utils/createAreaStyleFactory";
 import { getUnitStyle } from "@/utils/renderEntity";
 
@@ -29,13 +30,15 @@ interface GameMapPreviewProps {
 	areaTypes: { name: string, color: string }[],
 	className?: string,
 	allowInteraction?: boolean,
-	onUnitSelect?: (unit: Unit)=> void,
+	onUnitClick?: (unit: Unit | null)=> void,
+	onUnitSelect?: (unit: Unit | null)=> void,
 	onAreaSelect?: (area: ScenarioArea)=> void,
 	onMapReady?: (map: Map)=> void,
 	sourceRef?: React.RefObject<VectorSource>,
 	lineSourceRef?: React.RefObject<VectorSource>,
 	selectedUnit?: Unit | null,
 	sessionId: string,
+	session?: SessionSummary,
 }
 
 export function GameMapPreview({
@@ -50,6 +53,8 @@ export function GameMapPreview({
 	lineSourceRef,
 	selectedUnit,
 	sessionId,
+	session,
+	onUnitClick,
 }: GameMapPreviewProps) {
 	const mapRef = useRef<HTMLDivElement | null>(null);
 	const mapInstance = useRef<Map | null>(null);
@@ -67,12 +72,14 @@ export function GameMapPreview({
 			})),
 		),
 	);
+	const { userId } = useSocketStore();
 
-	// selectedUnitRef in sync with prop
+	// Keep selectedUnitRef in sync with selectedUnit prop
 	useEffect(() => {
 		selectedUnitRef.current = selectedUnit ?? null;
 	}, [selectedUnit]);
 
+	// Update positions of units if moved
 	useEffect(() => {
 		if (!mapInstance.current) return;
 
@@ -91,6 +98,7 @@ export function GameMapPreview({
 		}
 	}, [movedUnits]);
 
+	// Initialize map
 	useEffect(() => {
 		if (!mapRef.current || mapInstance.current) return;
 
@@ -123,8 +131,7 @@ export function GameMapPreview({
 				}
 
 				if (type === "objective") {
-					const state =
-						feature.get("state") as keyof typeof OBJECTIVE_STATE_STYLE_MAP;
+					const state = feature.get("state") as keyof typeof OBJECTIVE_STATE_STYLE_MAP;
 					const cfg = OBJECTIVE_STATE_STYLE_MAP[state];
 
 					return new Style({
@@ -147,12 +154,7 @@ export function GameMapPreview({
 
 		const map = new Map({
 			target: mapRef.current,
-			layers: [
-				new TileLayer({ source: new OSM() }),
-				mainLayer,
-				measureLayer,
-				lineLayer,
-			],
+			layers: [new TileLayer({ source: new OSM() }), mainLayer, measureLayer, lineLayer],
 			view: new View({
 				center: fromLonLat([0, 0]),
 				zoom: 2,
@@ -161,55 +163,8 @@ export function GameMapPreview({
 			interactions: allowInteraction ? undefined : [],
 		});
 
-		// 🎯 Click handling
-		const handleClick = (evt) => {
-			const unit = selectedUnitRef.current;
-
-			// 🧭 Moving unit if selected
-			if (unit && unit.position && lineSourceRef?.current) {
-				const from = fromLonLat([unit.position.lon, unit.position.lat]);
-				const to = map.getCoordinateFromPixel(evt.pixel);
-				const [lon, lat] = toLonLat(to);
-
-				// Draw movement line
-				const lineFeature = new Feature({
-					geometry: new LineString([from, to]),
-				});
-				lineSourceRef.current.clear();
-				lineSourceRef.current.addFeature(lineFeature);
-
-				// ✉️ Send MoveUnitRequest
-				const socket = useSocketStore.getState().socket;
-				if (socket) {
-					if (!sessionId || !unit.id) return;
-					const moveReq: MoveUnitRequest = {
-						sessionId,
-						unitId: unit.id,
-						targetLat: lat,
-						targetLon: lon,
-					};
-
-					const message: WsClientMessage = {
-						moveUnit: moveReq,
-					};
-
-					const encoded = WsClientMessage.encode(message).finish();
-					socket.send(encoded);
-				}
-
-				// Clear selection
-				selectedFeatureRef.current = null;
-				selectedUnitRef.current = null;
-				onUnitSelect?.(null);
-
-				map.getLayers().forEach((layer) => {
-					if (layer instanceof VectorLayer) layer.changed();
-				});
-
-				return;
-			}
-
-			// Normal selection
+		// Left-click: select unit or area
+		map.on("click", (evt) => {
 			const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
 			const type = feature?.get("type");
 
@@ -222,7 +177,8 @@ export function GameMapPreview({
 					if (unit) {
 						selectedUnitRef.current = unit;
 						lineSourceRef?.current?.clear();
-						onUnitSelect?.(unit);
+						onUnitClick?.(unit); // always show info
+						onUnitSelect?.(unit); // only used for control logic
 					}
 				} else if (type === "area") {
 					const areaId = feature.get("areaId");
@@ -233,14 +189,62 @@ export function GameMapPreview({
 				}
 			} else {
 				selectedFeatureRef.current = null;
+				selectedUnitRef.current = null;
+				onUnitSelect?.(null);
 			}
 
 			map.getLayers().forEach((layer) => {
 				if (layer instanceof VectorLayer) layer.changed();
 			});
-		};
+		});
 
-		map.on("click", handleClick);
+		// Right-click: move unit
+		mapRef.current.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			if (!mapRef.current || !mapInstance.current) return;
+			if (userId === null || session === undefined) return;
+
+			const unit = selectedUnitRef.current;
+			if (
+				!unit ||
+				!unit.position ||
+				!lineSourceRef?.current ||
+				!canControlUnit(unit, userId, session)
+			) return;
+
+			const rect = mapRef.current.getBoundingClientRect();
+			const pixel = [e.clientX - rect.left, e.clientY - rect.top];
+			const map = mapInstance.current;
+			const to = map.getCoordinateFromPixel(pixel);
+			const [lon, lat] = toLonLat(to);
+			const from = fromLonLat([unit.position.lon, unit.position.lat]);
+
+			const lineFeature = new Feature({ geometry: new LineString([from, to]) });
+			lineSourceRef.current.clear();
+			lineSourceRef.current.addFeature(lineFeature);
+
+			const socket = useSocketStore.getState().socket;
+			if (socket) {
+				const moveReq: MoveUnitRequest = {
+					sessionId,
+					unitId: unit.id ?? "",
+					targetLat: lat,
+					targetLon: lon,
+				};
+				const message: WsClientMessage = { moveUnit: moveReq };
+				const encoded = WsClientMessage.encode(message).finish();
+				socket.send(encoded);
+			}
+
+			selectedFeatureRef.current = null;
+			selectedUnitRef.current = null;
+			onUnitSelect?.(null);
+
+			map.getLayers().forEach((layer) => {
+				if (layer instanceof VectorLayer) layer.changed();
+			});
+		});
+
 		mapInstance.current = map;
 		onMapReady?.(map);
 	}, [
@@ -253,6 +257,8 @@ export function GameMapPreview({
 		sourceRef,
 		lineSourceRef,
 	]);
+
+	// Initial render of features
 	useEffect(() => {
 		if (!mapInstance.current || !scenario) return;
 
@@ -261,21 +267,17 @@ export function GameMapPreview({
 
 		scenario.units?.forEach((u) => {
 			if (!u.position) return;
-			const f = new Feature(
-				new Point(fromLonLat([u.position.lon, u.position.lat])),
-			);
+			const f = new Feature(new Point(fromLonLat([u.position.lon, u.position.lat])));
 			f.set("type", "unit");
 			f.set("unitId", u.id);
 			f.set("unitIcon", u.icon);
-			f.set("side", u.side === UnitSide.BLUE ? "enemy" : "ally");
+			f.set("side", u.side);
 			src.addFeature(f);
 		});
 
 		scenario.objectives?.forEach((o) => {
 			if (!o.position) return;
-			const f = new Feature(
-				new Point(fromLonLat([o.position.lon, o.position.lat])),
-			);
+			const f = new Feature(new Point(fromLonLat([o.position.lon, o.position.lat])));
 			f.set("type", "objective");
 			f.set("letter", o.letter);
 			f.set("state", o.state === 1 ? "capturing" : o.state === 2 ? "captured" : "neutral");

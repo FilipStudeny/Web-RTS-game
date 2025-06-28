@@ -46,10 +46,3 @@ pub struct SocketMessage {
     pub msg_type: SocketMessageType,
     pub payload: serde_json::Value,
 }
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct UnitType {
-    pub id: u8,
-    pub name: String,
-    pub description: String,
-}

@@ -135,6 +135,7 @@ export interface UnitType {
   accuracy: number;
   sightRange: number;
   movementSpeed: number;
+  damage: number;
 }
 
 export interface UnitTypeList {
@@ -142,7 +143,17 @@ export interface UnitTypeList {
 }
 
 function createBaseUnitType(): UnitType {
-  return { type: 0, name: "", description: "", icon: "", health: 0, accuracy: 0, sightRange: 0, movementSpeed: 0 };
+  return {
+    type: 0,
+    name: "",
+    description: "",
+    icon: "",
+    health: 0,
+    accuracy: 0,
+    sightRange: 0,
+    movementSpeed: 0,
+    damage: 0,
+  };
 }
 
 export const UnitType: MessageFns<UnitType> = {
@@ -170,6 +181,9 @@ export const UnitType: MessageFns<UnitType> = {
     }
     if (message.movementSpeed !== 0) {
       writer.uint32(69).float(message.movementSpeed);
+    }
+    if (message.damage !== 0) {
+      writer.uint32(72).uint32(message.damage);
     }
     return writer;
   },
@@ -245,6 +259,14 @@ export const UnitType: MessageFns<UnitType> = {
           message.movementSpeed = reader.float();
           continue;
         }
+        case 9: {
+          if (tag !== 72) {
+            break;
+          }
+
+          message.damage = reader.uint32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -264,6 +286,7 @@ export const UnitType: MessageFns<UnitType> = {
       accuracy: isSet(object.accuracy) ? globalThis.Number(object.accuracy) : 0,
       sightRange: isSet(object.sightRange) ? globalThis.Number(object.sightRange) : 0,
       movementSpeed: isSet(object.movementSpeed) ? globalThis.Number(object.movementSpeed) : 0,
+      damage: isSet(object.damage) ? globalThis.Number(object.damage) : 0,
     };
   },
 
@@ -293,6 +316,9 @@ export const UnitType: MessageFns<UnitType> = {
     if (message.movementSpeed !== 0) {
       obj.movementSpeed = message.movementSpeed;
     }
+    if (message.damage !== 0) {
+      obj.damage = Math.round(message.damage);
+    }
     return obj;
   },
 
@@ -309,6 +335,7 @@ export const UnitType: MessageFns<UnitType> = {
     message.accuracy = object.accuracy ?? 0;
     message.sightRange = object.sightRange ?? 0;
     message.movementSpeed = object.movementSpeed ?? 0;
+    message.damage = object.damage ?? 0;
     return message;
   },
 };

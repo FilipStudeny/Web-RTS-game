@@ -1,10 +1,9 @@
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use crate::load_configs_from_file;
-use crate::models::proto::UnitTypeKey;
 use std::{path::Path};
 use prost::Message;
-
+use crate::models::proto::{UnitType, UnitTypeKey, UnitTypeList};
 pub async fn get_unit_types() -> impl IntoResponse {
     let config_file = Path::new("../shared/configs/units-config.json");
 
@@ -13,12 +12,12 @@ pub async fn get_unit_types() -> impl IntoResponse {
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
     };
 
-    let proto_units: Vec<crate::models::proto::UnitType> = raw_units
+    let proto_units: Vec<UnitType> = raw_units
         .into_iter()
         .filter_map(|val| {
             let type_str = val.get("type")?.as_str()?.to_ascii_uppercase();
             let key = UnitTypeKey::from_str_name(&type_str)? as i32;
-            Some(crate::models::proto::UnitType {
+            Some(UnitType {
                 r#type: key,
                 name: val.get("name")?.as_str()?.to_string(),
                 description: val.get("description")?.as_str()?.to_string(),
@@ -27,11 +26,12 @@ pub async fn get_unit_types() -> impl IntoResponse {
                 accuracy: val.get("accuracy")?.as_f64()? as f32,
                 sight_range: val.get("sight_range")?.as_f64()? as f32,
                 movement_speed: val.get("movement_speed")?.as_f64()? as f32,
+                damage: val.get("damage")?.as_u64()? as u32,
             })
         })
         .collect();
 
-    let unit_list = crate::models::proto::UnitTypeList {
+    let unit_list = UnitTypeList {
         unit_types: proto_units,
     };
 

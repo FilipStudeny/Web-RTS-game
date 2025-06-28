@@ -30,6 +30,7 @@ message UnitType {
   float accuracy = 6;
   float sight_range = 7;
   float movement_speed = 8;
+  uint32 damage = 9; 
 }
 
 message UnitTypeList {

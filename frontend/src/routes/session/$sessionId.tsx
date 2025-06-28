@@ -1,4 +1,5 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
+import { Mouse } from "lucide-react";
 import VectorSource from "ol/source/Vector";
 import { useRef, useState } from "react";
 
@@ -19,6 +20,7 @@ import { ObjectiveBar, type Objective } from "@/features/ObjectiveBar";
 import { ResourcesPanel } from "@/features/ResourcesPanel";
 import { UnitInfoPanel } from "@/features/UnitDetailPanel";
 import { useSocketStore } from "@/integrations/stores/useSocketStore";
+import { canControlUnit } from "@/utils/canControlUnits";
 
 export const Route = createFileRoute("/session/$sessionId")({
 	component: RouteComponent,
@@ -73,6 +75,16 @@ function RouteComponent() {
 			position: [obj.position!.lon, obj.position!.lat],
 		}));
 
+	const handleUnitClick = (unit: Unit | null) => {
+		setSelectedUnit(unit); // Always show info, even if enemy
+	};
+
+	const handleUnitControl = (unit: Unit | null) => {
+		if (userId === null) return;
+		if (unit && !canControlUnit(unit, userId, session)) return;
+		setSelectedUnit(unit);
+	};
+
 	const selectedUnitType = selectedUnit
 		? unitTypes.find((t) => t.type === Number(selectedUnit.unitKey) as UnitTypeKey)
 		: undefined;
@@ -94,14 +106,15 @@ function RouteComponent() {
 					scenario={scenario as Scenario}
 					areaTypes={areaTypes.map(a => ({ name: a.name, color: a.color }))}
 					allowInteraction
-					onUnitSelect={setSelectedUnit}
-					onAreaSelect={setSelectedArea}
+					onUnitClick={handleUnitClick} // For info display (any unit)
+					onUnitSelect={handleUnitControl}					onAreaSelect={setSelectedArea}
 					onMapReady={setMapInstance}
 					sourceRef={measureSourceRef}
 					lineSourceRef={lineSourceRef}
 					selectedUnit={selectedUnit}
 					className="absolute inset-0 z-0"
 					sessionId={sessionId}
+					session={session}
 				/>
 
 				<ResourcesPanel
@@ -122,6 +135,32 @@ function RouteComponent() {
 						}}
 						onClose={() => setSelectedUnit(null)}
 					/>
+				)}
+
+				{selectedUnit && canControlUnit(selectedUnit, userId ?? "", session) && (
+					<div
+						className={`
+			absolute bottom-5 left-1/2 transform -translate-x-1/2
+			flex items-center gap-2
+			px-4 py-2
+			rounded-2xl border border-gray-700 bg-gray-800/80 backdrop-blur-md
+			text-slate-200 text-sm
+			shadow-lg
+			transition-opacity duration-300
+			${selectedUnit ? "opacity-100" : "opacity-0 pointer-events-none"}
+		`}
+					>
+						<div className="relative">
+							<Mouse className="w-5 h-5 text-blue-300" />
+							<div
+								className="absolute top-[2px] right-[4px] w-[6px] h-[10px] bg-white rounded-sm"
+								title="Right click"
+							/>
+						</div>
+						<span>
+							<span className="font-semibold text-blue-200">Right click</span> to move the unit
+						</span>
+					</div>
 				)}
 
 				<MeasurePanel

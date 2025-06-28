@@ -84,7 +84,13 @@ async fn main() {
     let db = Arc::new(db_client.database("simulation"));
 
     let redis_client = RedisClient::open("redis://127.0.0.1/").expect("Failed to create Redis client");
-    let redis_conn = redis_client.get_connection().expect("Failed to connect to Redis");
+    let mut redis_conn = redis_client.get_connection().expect("Failed to connect to Redis");
+    
+    // Flush Redis
+    match redis_conn.flushdb() {
+        Ok(_) => info!("✅ Redis database flushed on startup"),
+        Err(e) => error!("❌ Failed to flush Redis: {}", e),
+    }
 
     let state = AppState {
         db,

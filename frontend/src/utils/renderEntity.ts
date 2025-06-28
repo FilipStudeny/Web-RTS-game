@@ -66,16 +66,18 @@ export const renderEntityFeatures = (entity: Entity): Feature<Geometry>[] => {
 	return [circleFeature, iconFeature];
 };
 
+import { UnitSide } from "@/actions/proto/scenario";
+
 export const getUnitStyle = (
 	icon: string,
-	side: string,
+	side: UnitSide,
 	selected: boolean,
 ): Style => {
 	const color = selected
 		? "rgba(100, 200, 255, 0.6)"
-		: side === "enemy"
+		: side === UnitSide.RED
 			? "rgba(255, 100, 100, 0.4)"
-			: undefined;
+			: "rgba(100, 150, 255, 0.4)";
 
 	return new Style({
 		image: new Icon({
